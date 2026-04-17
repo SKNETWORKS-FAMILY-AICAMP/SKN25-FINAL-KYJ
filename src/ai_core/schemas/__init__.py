@@ -1,31 +1,74 @@
 """AI Core standard models shared across service boundaries and internal pipelines."""
 
 from ai_core.schemas.action_plan import ActionPlan
-from ai_core.schemas.answer import AnswerResult, DraftResult
+from ai_core.schemas.assistant import (
+    AssistantClarification,
+    AssistantArtifactName,
+    AssistantArtifacts,
+    AssistantExecutionPlan,
+    AssistantExecutionTrace,
+    AssistantRequest,
+    AssistantResponse,
+    AssistantResponseStatus,
+    AssistantStepExecution,
+    AssistantStepStatus,
+    AssistantToolCall,
+    AssistantToolInput,
+    AssistantToolName,
+)
+from ai_core.schemas.answer import DraftResult, GeneratedTextResult
 from ai_core.schemas.chunk import DocumentChunk
+from ai_core.schemas.indexed import IndexedDocument, IndexedFolder
 from ai_core.schemas.llm import LLMMessage
-from ai_core.schemas.recommendation import FolderRecommendation, FolderRecommendationResult
+from ai_core.schemas.query import AIQuery, QueryAnchor, SearchScope
+from ai_core.schemas.recommendation import (
+    DocumentRecommendation,
+    DocumentRecommendationResult,
+    FolderRecommendation,
+    FolderRecommendationResult,
+    RelatedRecommendationItem,
+    RelatedRecommendationResult,
+)
 from ai_core.schemas.retrieval import (
-    AIQuery,
-    DocumentScope,
     FolderRetrievalResult,
+    RelatedRetrievalItem,
     RelatedRetrievalResult,
     RetrievalResult,
 )
-from ai_core.schemas.source_document import SourceDocument
-from ai_core.schemas.source_folder import SourceFolder
+from ai_core.schemas.source import SourceDocument, SourceFolder
 
 __all__ = [
     "ActionPlan",
     "AIQuery",
-    "AnswerResult",
-    "DocumentScope",
+    "AssistantClarification",
+    "AssistantArtifactName",
+    "AssistantArtifacts",
+    "AssistantExecutionPlan",
+    "AssistantExecutionTrace",
+    "AssistantRequest",
+    "AssistantResponse",
+    "AssistantResponseStatus",
+    "AssistantStepExecution",
+    "AssistantStepStatus",
+    "AssistantToolCall",
+    "AssistantToolInput",
+    "AssistantToolName",
     "DocumentChunk",
+    "IndexedDocument",
+    "IndexedFolder",
+    "DocumentRecommendation",
+    "DocumentRecommendationResult",
     "DraftResult",
     "FolderRetrievalResult",
     "FolderRecommendation",
     "FolderRecommendationResult",
+    "GeneratedTextResult",
     "LLMMessage",
+    "QueryAnchor",
+    "SearchScope",
+    "RelatedRecommendationItem",
+    "RelatedRecommendationResult",
+    "RelatedRetrievalItem",
     "RelatedRetrievalResult",
     "RetrievalResult",
     "SourceFolder",

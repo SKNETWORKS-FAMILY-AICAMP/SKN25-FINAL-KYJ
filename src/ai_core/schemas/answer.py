@@ -6,8 +6,8 @@ from ai_core.schemas.retrieval import RetrievalResult
 
 
 @dataclass(slots=True)
-class AnswerResult:
-    answer: str
+class GeneratedTextResult:
+    text: str
     citations: list[RetrievalResult] = field(default_factory=list)
 
 
