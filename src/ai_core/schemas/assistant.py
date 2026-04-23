@@ -50,12 +50,6 @@ class AssistantResponseStatus(StrEnum):
 
 
 @dataclass(slots=True)
-class AssistantRequest:
-    text: str
-    context: Metadata = field(default_factory=dict)
-
-
-@dataclass(slots=True)
 class AssistantToolInput:
     query: AIQuery | None = None
     artifact_refs: tuple[AssistantArtifactName, ...] = ()

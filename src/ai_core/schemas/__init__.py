@@ -1,13 +1,19 @@
 """AI Core standard models shared across service boundaries and internal pipelines."""
 
-from ai_core.schemas.action_plan import ActionPlan
+from ai_core.schemas.actions import (
+    ActionPlan,
+    HostAction,
+    HostActionPolicy,
+    HostActionResult,
+    HostActionResultType,
+    HostActionStatus,
+)
 from ai_core.schemas.assistant import (
     AssistantClarification,
     AssistantArtifactName,
     AssistantArtifacts,
     AssistantExecutionPlan,
     AssistantExecutionTrace,
-    AssistantRequest,
     AssistantResponse,
     AssistantResponseStatus,
     AssistantStepExecution,
@@ -36,6 +42,15 @@ from ai_core.schemas.retrieval import (
     RetrievalResult,
 )
 from ai_core.schemas.source import SourceDocument, SourceFolder
+from ai_core.schemas.task import (
+    TaskDecision,
+    TaskDecisionType,
+    TaskEvent,
+    TaskEventType,
+    TaskAnalysis,
+    TaskSnapshot,
+    TaskStatus,
+)
 
 __all__ = [
     "ActionPlan",
@@ -45,7 +60,6 @@ __all__ = [
     "AssistantArtifacts",
     "AssistantExecutionPlan",
     "AssistantExecutionTrace",
-    "AssistantRequest",
     "AssistantResponse",
     "AssistantResponseStatus",
     "AssistantStepExecution",
@@ -73,4 +87,16 @@ __all__ = [
     "RetrievalResult",
     "SourceFolder",
     "SourceDocument",
+    "HostAction",
+    "HostActionPolicy",
+    "HostActionResult",
+    "HostActionResultType",
+    "HostActionStatus",
+    "TaskDecision",
+    "TaskDecisionType",
+    "TaskEvent",
+    "TaskEventType",
+    "TaskAnalysis",
+    "TaskSnapshot",
+    "TaskStatus",
 ]
