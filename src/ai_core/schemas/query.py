@@ -1,25 +1,5 @@
-from __future__ import annotations
+"""Compatibility re-exports for query contracts."""
 
-from dataclasses import dataclass, field
-from typing import Any
+from ai_core.domain.tasks import AIQuery, QueryAnchor, RequestContext, SearchScope
 
-
-@dataclass(slots=True)
-class SearchScope:
-    entity_type: str | None = None
-    entity_id: str | None = None
-
-
-@dataclass(slots=True)
-class QueryAnchor:
-    entity_type: str
-    entity_id: str
-    source_key: str | None = None
-
-
-@dataclass(slots=True)
-class AIQuery:
-    text: str
-    scope: SearchScope | None = None
-    anchor: QueryAnchor | None = None
-    context: dict[str, Any] = field(default_factory=dict)
+__all__ = ["AIQuery", "QueryAnchor", "RequestContext", "SearchScope"]

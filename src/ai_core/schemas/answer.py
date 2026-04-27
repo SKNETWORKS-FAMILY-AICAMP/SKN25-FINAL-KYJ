@@ -1,17 +1,5 @@
-from __future__ import annotations
+"""Compatibility re-exports for generated text artifacts."""
 
-from dataclasses import dataclass, field
+from ai_core.domain.tasks import DraftResult, GeneratedTextResult
 
-from ai_core.schemas.retrieval import RetrievalResult
-
-
-@dataclass(slots=True)
-class GeneratedTextResult:
-    text: str
-    citations: list[RetrievalResult] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class DraftResult:
-    draft: str
-    citations: list[RetrievalResult] = field(default_factory=list)
+__all__ = ["DraftResult", "GeneratedTextResult"]

@@ -1,58 +1,6 @@
-from __future__ import annotations
+"""Compatibility re-exports for indexed entities."""
 
-from dataclasses import dataclass, field
+from ai_core.domain.documents import IndexedDocument
+from ai_core.domain.folders import IndexedFolder
 
-from ai_core.common.types import Metadata
-from ai_core.schemas.source import SourceFolder
-
-
-@dataclass(slots=True)
-class IndexedDocument:
-    tenant: str
-    entity_type: str
-    entity_id: str
-    source_key: str
-    snippet: str
-    folder_ids: tuple[str, ...] = ()
-    tags: tuple[str, ...] = ()
-    metadata: Metadata = field(default_factory=dict)
-
-    @property
-    def document_key(self) -> str:
-        return f"{self.tenant}:{self.entity_type}:{self.entity_id}"
-
-
-@dataclass(slots=True)
-class IndexedFolder:
-    tenant: str
-    folder_id: str
-    name: str
-    path: str | None = None
-    parent_folder_id: str | None = None
-    description: str = ""
-    metadata: Metadata = field(default_factory=dict)
-
-    @classmethod
-    def from_source(cls, folder: SourceFolder) -> IndexedFolder:
-        return cls(
-            tenant=folder.tenant,
-            folder_id=folder.folder_id,
-            name=folder.name,
-            path=folder.path,
-            parent_folder_id=folder.parent_folder_id,
-            description=folder.description,
-            metadata=dict(folder.metadata),
-        )
-
-    @property
-    def folder_key(self) -> str:
-        return f"{self.tenant}:{self.folder_id}"
-
-    @property
-    def full_text(self) -> str:
-        parts = [self.name.strip()]
-        if self.description.strip():
-            parts.append(self.description.strip())
-        if self.path and self.path.strip():
-            parts.append(self.path.strip())
-        return "\n\n".join(part for part in parts if part).strip()
+__all__ = ["IndexedDocument", "IndexedFolder"]

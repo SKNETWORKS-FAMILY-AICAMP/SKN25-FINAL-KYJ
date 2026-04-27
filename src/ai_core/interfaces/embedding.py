@@ -1,10 +1,5 @@
-from __future__ import annotations
+"""Compatibility re-export for the embedding port."""
 
-from typing import Protocol
+from ai_core.application.ports.embedding import EmbeddingProvider
 
-from ai_core.common.types import Vector
-
-
-class EmbeddingProvider(Protocol):
-    def embed_texts(self, texts: list[str]) -> list[Vector]:
-        """Return a vector for each input text."""
+__all__ = ["EmbeddingProvider"]

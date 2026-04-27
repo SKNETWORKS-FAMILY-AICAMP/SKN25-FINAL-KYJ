@@ -1,10 +1,5 @@
-from __future__ import annotations
+"""Compatibility re-export for LLM messages."""
 
-from dataclasses import dataclass
-from typing import Literal
+from ai_core.domain.tasks import LLMMessage
 
-
-@dataclass(slots=True)
-class LLMMessage:
-    role: Literal["system", "user", "assistant"]
-    content: str
+__all__ = ["LLMMessage"]

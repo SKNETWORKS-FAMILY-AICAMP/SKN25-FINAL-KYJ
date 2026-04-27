@@ -2,11 +2,17 @@
 
 from ai_core.schemas.actions import (
     ActionPlan,
+    CreateDocumentInput,
     HostAction,
+    HostActionInput,
     HostActionPolicy,
     HostActionResult,
     HostActionResultType,
     HostActionStatus,
+    HostActionType,
+    LinkDocumentsInput,
+    MoveDocumentInput,
+    UpdateDocumentInput,
 )
 from ai_core.schemas.assistant import (
     AssistantClarification,
@@ -26,7 +32,7 @@ from ai_core.schemas.answer import DraftResult, GeneratedTextResult
 from ai_core.schemas.chunk import DocumentChunk
 from ai_core.schemas.indexed import IndexedDocument, IndexedFolder
 from ai_core.schemas.llm import LLMMessage
-from ai_core.schemas.query import AIQuery, QueryAnchor, SearchScope
+from ai_core.schemas.query import AIQuery, QueryAnchor, RequestContext, SearchScope
 from ai_core.schemas.recommendation import (
     DocumentRecommendation,
     DocumentRecommendationResult,
@@ -47,6 +53,7 @@ from ai_core.schemas.task import (
     TaskDecisionType,
     TaskEvent,
     TaskEventType,
+    TaskRequest,
     TaskAnalysis,
     TaskSnapshot,
     TaskStatus,
@@ -67,6 +74,7 @@ __all__ = [
     "AssistantToolCall",
     "AssistantToolInput",
     "AssistantToolName",
+    "CreateDocumentInput",
     "DocumentChunk",
     "IndexedDocument",
     "IndexedFolder",
@@ -79,6 +87,7 @@ __all__ = [
     "GeneratedTextResult",
     "LLMMessage",
     "QueryAnchor",
+    "RequestContext",
     "SearchScope",
     "RelatedRecommendationItem",
     "RelatedRecommendationResult",
@@ -88,15 +97,21 @@ __all__ = [
     "SourceFolder",
     "SourceDocument",
     "HostAction",
+    "HostActionInput",
     "HostActionPolicy",
     "HostActionResult",
     "HostActionResultType",
     "HostActionStatus",
+    "HostActionType",
+    "LinkDocumentsInput",
+    "MoveDocumentInput",
     "TaskDecision",
     "TaskDecisionType",
     "TaskEvent",
     "TaskEventType",
+    "TaskRequest",
     "TaskAnalysis",
     "TaskSnapshot",
     "TaskStatus",
+    "UpdateDocumentInput",
 ]
