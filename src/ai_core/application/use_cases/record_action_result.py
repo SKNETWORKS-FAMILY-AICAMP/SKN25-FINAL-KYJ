@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ai_core.application.models.actions import HostActionResult, HostActionResultType, HostActionStatus
+from ai_core.application.models.actions import (
+    HostActionResult,
+    HostActionResultType,
+    HostActionStatus,
+)
 from ai_core.application.models.tasks import TaskStatus
 from ai_core.application.ports.task_store import TaskStore
+from ai_core.common.validation import require_non_blank
 
 
 @dataclass(slots=True)
@@ -12,6 +17,8 @@ class RecordActionResultUseCase:
     tasks: TaskStore
 
     def execute(self, *, tenant: str, task_id: str, result: HostActionResult) -> None:
+        require_non_blank(tenant, "tenant")
+        require_non_blank(task_id, "task_id")
         snapshot = self.tasks.get(tenant=tenant, task_id=task_id)
         if snapshot is None:
             raise ValueError(f"Task not found: {task_id}")

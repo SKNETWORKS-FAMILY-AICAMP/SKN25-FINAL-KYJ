@@ -2,21 +2,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from ai_core.api.dto._plain import to_plain
-from ai_core.api.dto.actions import HostActionDTO
+from ai_core.api.dto.action_plans import HostActionDTO
+from ai_core.api.dto.base import APIBaseDTO
+from ai_core.api.dto.outputs import TaskOutputDTO, task_output_from_model
 from ai_core.application.models.tasks import (
     TaskAnalysis,
     TaskEvent,
+    TaskEventType,
     TaskRequest,
     TaskSnapshot,
+    TaskStatus,
 )
 
 
-class CreateTaskRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class CreateTaskRequest(APIBaseDTO):
     task_id: str
     tenant: str
     request: str
@@ -37,11 +39,9 @@ class CreateTaskRequest(BaseModel):
         )
 
 
-class TaskEventDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class TaskEventDTO(APIBaseDTO):
     event_id: str
-    event_type: str
+    event_type: TaskEventType
     message: str
     data: dict[str, Any] = Field(default_factory=dict)
 
@@ -49,49 +49,29 @@ class TaskEventDTO(BaseModel):
     def from_model(cls, event: TaskEvent) -> TaskEventDTO:
         return cls(
             event_id=event.event_id,
-            event_type=event.event_type.value,
+            event_type=event.event_type,
             message=event.message,
             data=to_plain(event.data),
         )
 
 
-class TaskAnalysisDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    response: str
-    clarification: dict[str, Any] | None = None
-    document_recommendation: dict[str, Any] | None = None
-    folder_recommendation: dict[str, Any] | None = None
-    related_recommendation: dict[str, Any] | None = None
-    answer: dict[str, Any] | None = None
-    summary: dict[str, Any] | None = None
-    draft: dict[str, Any] | None = None
-    ideas: dict[str, Any] | None = None
-    action_plan: dict[str, Any] | None = None
+class TaskAnalysisDTO(APIBaseDTO):
+    message: str
+    outputs: list[TaskOutputDTO] = Field(default_factory=list)
 
     @classmethod
     def from_model(cls, analysis: TaskAnalysis) -> TaskAnalysisDTO:
         return cls(
-            response=analysis.response,
-            clarification=to_plain(analysis.clarification),
-            document_recommendation=to_plain(analysis.document_recommendation),
-            folder_recommendation=to_plain(analysis.folder_recommendation),
-            related_recommendation=to_plain(analysis.related_recommendation),
-            answer=to_plain(analysis.answer),
-            summary=to_plain(analysis.summary),
-            draft=to_plain(analysis.draft),
-            ideas=to_plain(analysis.ideas),
-            action_plan=to_plain(analysis.action_plan),
+            message=analysis.message,
+            outputs=[task_output_from_model(output) for output in analysis.outputs],
         )
 
 
-class TaskSnapshotDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class TaskSnapshotDTO(APIBaseDTO):
     task_id: str
     tenant: str
     request: str
-    status: str
+    status: TaskStatus
     analysis: TaskAnalysisDTO
     host_actions: list[HostActionDTO] = Field(default_factory=list)
     error: str | None = None
@@ -107,7 +87,7 @@ class TaskSnapshotDTO(BaseModel):
             task_id=task.task_id,
             tenant=task.tenant,
             request=task.request,
-            status=task.status.value,
+            status=task.status,
             analysis=TaskAnalysisDTO.from_model(task.analysis),
             host_actions=[HostActionDTO.from_model(action) for action in task.host_actions],
             error=task.error,
@@ -119,9 +99,7 @@ class TaskSnapshotDTO(BaseModel):
         )
 
 
-class TaskSnapshotResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class TaskSnapshotResponse(APIBaseDTO):
     task: TaskSnapshotDTO
 
     @classmethod

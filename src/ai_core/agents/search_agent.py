@@ -8,6 +8,7 @@ from ai_core.application.ports.embedding import EmbeddingProvider
 from ai_core.application.use_cases.hybrid_search import HybridSearchConfig, HybridSearchUseCase
 from ai_core.application.models.retrieval import RetrievalResult
 from ai_core.application.models.queries import AIQuery
+from ai_core.common.validation import InvalidInputError
 
 
 @dataclass(slots=True)
@@ -28,7 +29,9 @@ class SearchAgent:
                 config=config,
             ).execute(query)
 
-        tenant = query.request_context.tenant if query.request_context else ""
+        if query.request_context is None:
+            raise InvalidInputError("request_context.tenant is required.")
+        tenant = query.request_context.tenant
         vector = self.embeddings.embed_texts([query.text])[0]
         return self.documents.similarity_search(
             tenant=tenant,

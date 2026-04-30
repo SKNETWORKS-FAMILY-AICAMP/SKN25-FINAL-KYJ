@@ -16,7 +16,7 @@ class RunTaskUseCase:
             tenant=request.tenant,
             request=request.request,
             status=TaskStatus.CLARIFICATION_REQUIRED,
-            analysis=TaskAnalysis(response="Task accepted for workflow planning."),
+            analysis=TaskAnalysis(message="Task accepted for workflow planning."),
             user_id=request.user_id,
             request_id=request.request_id,
             metadata=dict(request.context),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ai_core.application.ports.document_keyword_store import DocumentKeywordSearchStore
 from ai_core.application.ports.document_vector_store import DocumentVectorStore
 from ai_core.application.ports.embedding import EmbeddingProvider
 from ai_core.domain.chunks import DocumentChunk
@@ -12,6 +13,7 @@ from ai_core.domain.documents import SourceDocument
 class IndexDocumentUseCase:
     embeddings: EmbeddingProvider
     documents: DocumentVectorStore
+    keywords: DocumentKeywordSearchStore | None = None
     chunk_size: int = 1200
     chunk_overlap: int = 120
 
@@ -23,10 +25,18 @@ class IndexDocumentUseCase:
                 entity_type=document.entity_type,
                 entity_id=document.entity_id,
             )
+            if self.keywords is not None:
+                self.keywords.delete(
+                    tenant=document.tenant,
+                    entity_type=document.entity_type,
+                    entity_id=document.entity_id,
+                )
             return []
 
         vectors = self.embeddings.embed_texts([chunk.text for chunk in chunks])
         self.documents.upsert(chunks, vectors)
+        if self.keywords is not None:
+            self.keywords.upsert(chunks)
         return chunks
 
     def _chunk(self, document: SourceDocument) -> list[DocumentChunk]:

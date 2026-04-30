@@ -4,10 +4,10 @@ __all__ = [
     "agents",
     "api",
     "application",
+    "bootstrap",
     "common",
     "domain",
     "infrastructure",
     "interfaces",
-    "schemas",
     "workflows",
 ]

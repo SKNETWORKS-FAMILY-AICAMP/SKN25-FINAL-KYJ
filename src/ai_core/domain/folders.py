@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ai_core.common.types import Metadata
+from ai_core.common.validation import require_non_blank, require_optional_non_blank
 
 
 @dataclass(slots=True)
@@ -14,6 +15,11 @@ class SourceFolder:
     parent_folder_id: str | None = None
     description: str = ""
     metadata: Metadata = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        require_non_blank(self.tenant, "tenant")
+        require_non_blank(self.folder_id, "folder_id")
+        require_optional_non_blank(self.parent_folder_id, "parent_folder_id")
 
     @property
     def folder_key(self) -> str:
@@ -38,6 +44,11 @@ class IndexedFolder:
     parent_folder_id: str | None = None
     description: str = ""
     metadata: Metadata = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        require_non_blank(self.tenant, "tenant")
+        require_non_blank(self.folder_id, "folder_id")
+        require_optional_non_blank(self.parent_folder_id, "parent_folder_id")
 
     @classmethod
     def from_source(cls, folder: SourceFolder) -> IndexedFolder:
