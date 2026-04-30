@@ -1,54 +1,30 @@
 """Pydantic DTOs for the REST API boundary."""
 
-from ai_core.api.dto.action_inputs import (
-    CreateDocumentInputDTO,
-    HostActionInputDTO,
-    LinkDocumentsInputDTO,
-    MoveDocumentInputDTO,
-    UpdateDocumentInputDTO,
-)
-from ai_core.api.dto.action_outputs import (
-    CreateDocumentOutputDTO,
-    HostActionResultOutputDTO,
-    LinkDocumentsOutputDTO,
-    MoveDocumentOutputDTO,
-    UpdateDocumentOutputDTO,
-)
-from ai_core.api.dto.action_plans import (
+from ai_core.api.dto.actions import (
     ActionPlanDTO,
+    CreateDocumentInputDTO,
+    CreateDocumentOutputDTO,
+    HostActionInputDTO,
+    HostActionResultOutputDTO,
     HostActionDTO,
     HostActionPolicyDTO,
-)
-from ai_core.api.dto.action_results import (
     HostActionResultDTO,
+    LinkDocumentsInputDTO,
+    LinkDocumentsOutputDTO,
+    MoveDocumentInputDTO,
+    MoveDocumentOutputDTO,
     RecordHostActionResultRequest,
     RecordHostActionResultResponse,
+    UpdateDocumentInputDTO,
+    UpdateDocumentOutputDTO,
 )
 from ai_core.api.dto.base import APIBaseDTO
 from ai_core.api.dto.documents import IndexedDocumentDTO, IndexedFolderDTO, SourceDocumentDTO
-from ai_core.api.dto.generation import (
-    AssistantClarificationDTO,
-    DraftResultDTO,
-    GeneratedTextResponse,
-)
 from ai_core.api.dto.indexing import (
     DeleteDocumentIndexRequest,
     DeleteDocumentIndexResponse,
     IndexDocumentRequest,
     IndexDocumentResponse,
-)
-from ai_core.api.dto.outputs import (
-    ActionPlanOutputDTO,
-    AnswerOutputDTO,
-    ClarificationOutputDTO,
-    DocumentRecommendationOutputDTO,
-    DraftOutputDTO,
-    FolderRecommendationOutputDTO,
-    IdeasOutputDTO,
-    RelatedRecommendationOutputDTO,
-    SummaryOutputDTO,
-    TaskOutputDTO,
-    TaskOutputMetaDTO,
 )
 from ai_core.api.dto.queries import (
     AIQueryDTO,
@@ -56,26 +32,38 @@ from ai_core.api.dto.queries import (
     RequestContextDTO,
     SearchScopeDTO,
 )
-from ai_core.api.dto.recommendations import (
+from ai_core.api.dto.retrieval import (
+    AnswerQuestionRequest,
+    AssistantClarificationDTO,
     DocumentRecommendationDTO,
     DocumentRecommendationResultDTO,
+    DraftResultDTO,
     FolderRecommendationDTO,
     FolderRecommendationResultDTO,
+    GeneratedTextResponse,
     RecommendFolderRequest,
     RecommendFolderResponse,
     RelatedRecommendationItemDTO,
     RelatedRecommendationResultDTO,
-)
-from ai_core.api.dto.retrieval import (
-    AnswerQuestionRequest,
     RetrievalResultDTO,
     SearchDocumentsRequest,
     SearchDocumentsResponse,
 )
 from ai_core.api.dto.tasks import (
+    ActionPlanOutputDTO,
+    AnswerOutputDTO,
+    ClarificationOutputDTO,
     CreateTaskRequest,
+    DocumentRecommendationOutputDTO,
+    DraftOutputDTO,
+    FolderRecommendationOutputDTO,
+    IdeasOutputDTO,
+    RelatedRecommendationOutputDTO,
+    SummaryOutputDTO,
     TaskAnalysisDTO,
     TaskEventDTO,
+    TaskOutputDTO,
+    TaskOutputMetaDTO,
     TaskSnapshotDTO,
     TaskSnapshotResponse,
 )

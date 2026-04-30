@@ -4,8 +4,7 @@ from typing import Any
 
 from pydantic import Field
 
-from ai_core.api.dto._plain import to_plain
-from ai_core.api.dto.base import APIBaseDTO
+from ai_core.api.dto.base import APIBaseDTO, to_plain
 from ai_core.domain.documents import IndexedDocument, SourceDocument
 from ai_core.domain.folders import IndexedFolder
 

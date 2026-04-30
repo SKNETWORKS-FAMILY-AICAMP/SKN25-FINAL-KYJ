@@ -3,10 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ai_core.api.errors import invalid_input_response
-from ai_core.api.dto.generation import GeneratedTextResponse
-from ai_core.api.dto.recommendations import RecommendFolderRequest, RecommendFolderResponse
 from ai_core.api.dto.retrieval import (
     AnswerQuestionRequest,
+    GeneratedTextResponse,
+    RecommendFolderRequest,
+    RecommendFolderResponse,
     SearchDocumentsRequest,
     SearchDocumentsResponse,
 )

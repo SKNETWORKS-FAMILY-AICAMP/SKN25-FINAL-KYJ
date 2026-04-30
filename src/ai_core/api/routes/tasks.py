@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ai_core.api.errors import invalid_input_response
-from ai_core.api.dto.action_results import (
+from ai_core.api.dto.actions import (
     RecordHostActionResultRequest,
     RecordHostActionResultResponse,
 )
