@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ai_core.domain.tasks import AssistantExecutionPlan, AssistantToolCall, AssistantToolName, AIQuery
+from ai_core.application.models.queries import AIQuery
+from ai_core.workflows.models.assistant import (
+    AssistantExecutionPlan,
+    AssistantToolCall,
+    AssistantToolName,
+)
 
 
 @dataclass(slots=True)

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ai_core.application.models.llm import LLMMessage
+from ai_core.application.models.results import GeneratedTextResult
+from ai_core.application.models.retrieval import RetrievalResult
 from ai_core.application.ports.llm import LLM
-from ai_core.domain.chunks import RetrievalResult
-from ai_core.domain.tasks import GeneratedTextResult, LLMMessage
 
 
 @dataclass(slots=True)

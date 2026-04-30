@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from ai_core.application.models.retrieval import FolderRetrievalResult
 from ai_core.common.types import Vector
-from ai_core.domain.chunks import FolderRetrievalResult
 from ai_core.domain.folders import IndexedFolder
 
 

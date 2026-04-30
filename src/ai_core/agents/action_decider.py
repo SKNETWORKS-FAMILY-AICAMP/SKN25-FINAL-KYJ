@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ai_core.domain.actions import HostAction, HostActionStatus
-from ai_core.domain.tasks import TaskSnapshot
+from ai_core.application.models.actions import HostAction, HostActionStatus
+from ai_core.application.models.tasks import TaskSnapshot
 
 
 @dataclass(slots=True)

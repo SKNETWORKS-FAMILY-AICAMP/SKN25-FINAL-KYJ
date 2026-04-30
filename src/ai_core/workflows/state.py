@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ai_core.domain.actions import HostAction, HostActionResult
-from ai_core.domain.tasks import AssistantArtifacts, AssistantExecutionTrace, TaskSnapshot
+from ai_core.application.models.actions import HostAction, HostActionResult
+from ai_core.application.models.tasks import TaskSnapshot
+from ai_core.workflows.models.assistant import AssistantArtifacts, AssistantExecutionTrace
 
 
 @dataclass(slots=True)

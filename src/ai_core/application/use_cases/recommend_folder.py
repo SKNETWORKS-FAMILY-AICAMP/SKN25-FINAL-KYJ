@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ai_core.application.models.results import FolderRecommendation, FolderRecommendationResult
 from ai_core.application.ports.embedding import EmbeddingProvider
 from ai_core.application.ports.folder_vector_store import FolderVectorStore
 from ai_core.domain.documents import SourceDocument
-from ai_core.domain.tasks import FolderRecommendation, FolderRecommendationResult
 
 
 @dataclass(slots=True)

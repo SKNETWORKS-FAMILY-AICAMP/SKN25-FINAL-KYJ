@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ai_core.application.models.actions import HostActionResult, HostActionResultType, HostActionStatus
+from ai_core.application.models.tasks import TaskStatus
 from ai_core.application.ports.task_store import TaskStore
-from ai_core.domain.actions import HostActionResult, HostActionResultType, HostActionStatus
-from ai_core.domain.tasks import TaskStatus
 
 
 @dataclass(slots=True)

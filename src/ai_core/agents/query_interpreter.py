@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ai_core.domain.tasks import AIQuery, RequestContext
+from ai_core.application.models.queries import AIQuery, RequestContext
 
 
 @dataclass(slots=True)

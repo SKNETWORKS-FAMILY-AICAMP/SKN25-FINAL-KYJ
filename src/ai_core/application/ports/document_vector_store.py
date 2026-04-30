@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from ai_core.application.models.queries import SearchScope
+from ai_core.application.models.retrieval import RetrievalResult
 from ai_core.common.types import Vector
-from ai_core.domain.chunks import DocumentChunk, RetrievalResult
-from ai_core.domain.tasks import SearchScope
+from ai_core.domain.chunks import DocumentChunk
 
 
 class DocumentVectorStore(Protocol):

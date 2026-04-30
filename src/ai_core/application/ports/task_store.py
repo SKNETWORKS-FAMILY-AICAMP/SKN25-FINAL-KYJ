@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ai_core.domain.tasks import TaskEvent, TaskRequest, TaskSnapshot
+from ai_core.application.models.tasks import TaskEvent, TaskRequest, TaskSnapshot
 
 
 class TaskStore(Protocol):

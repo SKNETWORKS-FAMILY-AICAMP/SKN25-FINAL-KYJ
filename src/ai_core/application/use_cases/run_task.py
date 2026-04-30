@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ai_core.application.models.tasks import TaskAnalysis, TaskRequest, TaskSnapshot, TaskStatus
 from ai_core.application.ports.task_store import TaskStore
-from ai_core.domain.tasks import TaskAnalysis, TaskRequest, TaskSnapshot, TaskStatus
 
 
 @dataclass(slots=True)
