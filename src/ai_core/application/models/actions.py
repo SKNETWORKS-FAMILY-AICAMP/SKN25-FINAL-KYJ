@@ -77,7 +77,6 @@ HostActionInput: TypeAlias = (
     | UpdateDocumentInput
     | MoveDocumentInput
     | LinkDocumentsInput
-    | dict[str, Any]
 )
 
 
