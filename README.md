@@ -45,14 +45,11 @@ src/ai_core/
     models/        Assistant execution and task state models.
   agents/          Specialized AI step implementations.
   infrastructure/  Concrete adapters for providers and persistence.
-  interfaces/      Backward-compatible port re-exports.
   common/          Shared primitive types.
 ```
 
-The domain and application layers contain the stable core. `interfaces` is a
-compatibility layer for existing port imports; new code should prefer
-`ai_core.domain`, `ai_core.api.dto`, `ai_core.application.models`,
-`ai_core.workflows.models`, and `ai_core.application.ports`.
+The domain and application layers contain the stable core. External provider
+and persistence contracts live in `ai_core.application.ports`.
 
 API DTOs inherit from `APIBaseDTO`, a Pydantic base model that rejects unknown
 fields at the REST boundary. Request DTOs provide `to_model()` methods, and response
@@ -113,7 +110,7 @@ RRF.
 
 ```bash
 python -m pip install -r requirements.txt
-PYTHONPATH=src python -S -c "import ai_core.domain; import ai_core.interfaces"
+PYTHONPATH=src python -S -c "import ai_core.domain; import ai_core.application.ports"
 PYTHONPATH=src python -m unittest discover -s tests
 python -m compileall src
 ```

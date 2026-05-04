@@ -8,6 +8,5 @@ __all__ = [
     "common",
     "domain",
     "infrastructure",
-    "interfaces",
     "workflows",
 ]
