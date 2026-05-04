@@ -63,7 +63,3 @@ class APISettings(BaseSettings):
     @classmethod
     def parse_cors_origins(cls, value: Any) -> tuple[str, ...]:
         return _parse_cors_origins(value)
-
-    @classmethod
-    def from_env(cls) -> APISettings:
-        return cls()

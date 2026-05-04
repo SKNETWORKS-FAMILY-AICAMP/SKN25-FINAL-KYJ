@@ -32,7 +32,7 @@ def create_app(
     *,
     settings: APISettings | None = None,
 ) -> FastAPI:
-    settings = settings or APISettings.from_env()
+    settings = settings or APISettings()
     app = FastAPI(title=settings.title, version=settings.version)
 
     if settings.cors_origins:

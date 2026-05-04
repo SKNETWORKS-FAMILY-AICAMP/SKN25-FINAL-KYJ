@@ -144,8 +144,7 @@ class BootstrapTests(unittest.TestCase):
             os.environ["FOLDMIND_CORS_ORIGINS"] = "http://localhost:3000, https://app.test"
             os.environ["FOLDMIND_CORS_ALLOW_CREDENTIALS"] = "false"
 
-            settings = APISettings.from_env()
-            direct_settings = APISettings()
+            settings = APISettings()
 
             self.assertEqual(settings.title, "Custom FoldMind")
             self.assertEqual(settings.version, "9.9.9")
@@ -154,11 +153,6 @@ class BootstrapTests(unittest.TestCase):
                 ("http://localhost:3000", "https://app.test"),
             )
             self.assertFalse(settings.cors_allow_credentials)
-            self.assertEqual(direct_settings.title, "Custom FoldMind")
-            self.assertEqual(
-                direct_settings.cors_origins,
-                ("http://localhost:3000", "https://app.test"),
-            )
             self.assertIn("cors_origins", APISettings.model_fields)
             self.assertNotIn("cors_origins_csv", APISettings.model_fields)
         finally:
