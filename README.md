@@ -101,10 +101,10 @@ Document retrieval supports three modes through `HybridSearchConfig`:
 - `hybrid`: dense and keyword results combined with RRF.
 
 `DocumentVectorStore` owns dense retrieval. `DocumentKeywordSearchStore` owns
-keyword/sparse retrieval. `HybridSearchConfig` and `SearchMode` live with
-`HybridSearchUseCase` in the application layer because they are retrieval execution
-options, not domain concepts. `HybridSearchUseCase` combines both result lists using
-RRF.
+keyword/sparse retrieval. `HybridSearchConfig` and `SearchMode` live with the
+search agent because they are retrieval execution options, not domain concepts.
+`HybridSearchUseCase` exposes search as an app-server callable operation and delegates
+the retrieval work to `SearchAgent`, which combines both result lists using RRF.
 
 ## Development
 

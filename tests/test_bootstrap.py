@@ -202,7 +202,7 @@ class BootstrapTests(unittest.TestCase):
             },
         )
 
-        self.assertIs(use_cases.answer_question.hybrid_search, use_cases.search_documents)
+        self.assertIs(use_cases.answer_question.search, use_cases.search_documents.search)
         self.assertEqual(index_response.status_code, 200)
         self.assertGreater(len(document_vectors.upserted), 0)
         self.assertGreater(len(document_keywords.upserted), 0)

@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from typing import get_args, get_type_hints
 
 from pydantic import BaseModel, ValidationError
 
 from ai_core.common import Metadata, Vector
-from ai_core.agents.search_agent import SearchAgent
-from ai_core.application.use_cases.hybrid_search import (
+from ai_core.agents.search_agent import (
     HybridSearchConfig,
-    HybridSearchUseCase,
     SearchMode,
+    SearchAgent,
     reciprocal_rank_fusion,
 )
+from ai_core.application.use_cases.hybrid_search import HybridSearchUseCase
 from ai_core.application.models.actions import (
     ActionPlan,
     CreateDocumentInput,
@@ -609,15 +610,17 @@ class ContractTests(unittest.TestCase):
         ]
 
         results = HybridSearchUseCase(
-            embeddings=FakeEmbeddingProvider(),
-            documents=FakeDocumentVectorStore(dense),
-            keywords=FakeKeywordSearchStore(keyword),
-            config=HybridSearchConfig(
-                mode=SearchMode.HYBRID,
-                top_k=2,
-                dense_top_k=2,
-                keyword_top_k=2,
-            ),
+            search=SearchAgent(
+                embeddings=FakeEmbeddingProvider(),
+                documents=FakeDocumentVectorStore(dense),
+                keywords=FakeKeywordSearchStore(keyword),
+                config=HybridSearchConfig(
+                    mode=SearchMode.HYBRID,
+                    top_k=2,
+                    dense_top_k=2,
+                    keyword_top_k=2,
+                ),
+            )
         ).execute(AIQuery(text="meeting notes", request_context=RequestContext(tenant="tenant-1")))
 
         self.assertEqual(
@@ -642,12 +645,18 @@ class ContractTests(unittest.TestCase):
                     RetrievalResult(chunk=chunk_b, score=12.0),
                 ]
             ),
-            hybrid_config=HybridSearchConfig(mode=SearchMode.HYBRID, top_k=1),
+            config=HybridSearchConfig(mode=SearchMode.HYBRID, top_k=1),
         ).search_documents(
             AIQuery(text="meeting notes", request_context=RequestContext(tenant="tenant-1"))
         )
 
         self.assertEqual(results[0].chunk.chunk_id, "doc-b:chunk:0")
+
+    def test_agents_do_not_depend_on_use_cases(self) -> None:
+        agents_dir = Path(__file__).parents[1] / "src" / "ai_core" / "agents"
+
+        for path in agents_dir.glob("*.py"):
+            self.assertNotIn("application.use_cases", path.read_text())
 
 
 if __name__ == "__main__":

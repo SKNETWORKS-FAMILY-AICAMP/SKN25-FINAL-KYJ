@@ -4,6 +4,9 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI
 
+from ai_core.agents.answer_generator import AnswerGeneratorAgent
+from ai_core.agents.folder_recommender import FolderRecommenderAgent
+from ai_core.agents.search_agent import HybridSearchConfig, SearchAgent
 from ai_core.api.app import APIUseCases, create_app
 from ai_core.api.settings import APISettings
 from ai_core.application.ports.document_keyword_store import DocumentKeywordSearchStore
@@ -14,7 +17,7 @@ from ai_core.application.ports.llm import LLM
 from ai_core.application.ports.task_store import TaskStore
 from ai_core.application.use_cases.answer_question import AnswerQuestionUseCase
 from ai_core.application.use_cases.delete_document_index import DeleteDocumentIndexUseCase
-from ai_core.application.use_cases.hybrid_search import HybridSearchConfig, HybridSearchUseCase
+from ai_core.application.use_cases.hybrid_search import HybridSearchUseCase
 from ai_core.application.use_cases.index_document import IndexDocumentUseCase
 from ai_core.application.use_cases.recommend_folder import RecommendFolderUseCase
 from ai_core.application.use_cases.record_action_result import RecordActionResultUseCase
@@ -36,12 +39,13 @@ def build_use_cases(
     *,
     hybrid_search_config: HybridSearchConfig | None = None,
 ) -> APIUseCases:
-    hybrid_search = HybridSearchUseCase(
+    search_agent = SearchAgent(
         embeddings=dependencies.embeddings,
         documents=dependencies.document_vectors,
         keywords=dependencies.document_keywords,
         config=hybrid_search_config or HybridSearchConfig(),
     )
+    hybrid_search = HybridSearchUseCase(search=search_agent)
     return APIUseCases(
         index_document=IndexDocumentUseCase(
             embeddings=dependencies.embeddings,
@@ -56,14 +60,14 @@ def build_use_cases(
         record_action_result=RecordActionResultUseCase(tasks=dependencies.tasks),
         search_documents=hybrid_search,
         answer_question=AnswerQuestionUseCase(
-            embeddings=dependencies.embeddings,
-            documents=dependencies.document_vectors,
-            llm=dependencies.llm,
-            hybrid_search=hybrid_search,
+            search=search_agent,
+            answer_generator=AnswerGeneratorAgent(llm=dependencies.llm),
         ),
         recommend_folder=RecommendFolderUseCase(
-            embeddings=dependencies.embeddings,
-            folders=dependencies.folder_vectors,
+            folder_recommender=FolderRecommenderAgent(
+                embeddings=dependencies.embeddings,
+                folders=dependencies.folder_vectors,
+            ),
         ),
     )
 
