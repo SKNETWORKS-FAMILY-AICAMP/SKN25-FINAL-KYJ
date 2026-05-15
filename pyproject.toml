@@ -5,16 +5,24 @@ description = "AI workflow core for FoldMind personal knowledge management."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.16",
+    "confluent-kafka>=2.6",
     "fastapi>=0.115",
+    "langgraph>=1.0",
+    "langgraph-checkpoint>=2.1,<5.0",
+    "langgraph-checkpoint-postgres>=2.0",
+    "openai>=2.36,<3.0",
     "pydantic>=2.8",
     "pydantic-settings>=2.7",
+    "psycopg[binary]>=3.2",
+    "qdrant-client>=1.12",
+    "neo4j>=5.25",
     "uvicorn[standard]>=0.30",
 ]
 
 [project.optional-dependencies]
 ai = [
-    "langchain>=0.3",
-    "langgraph>=0.2",
+    "langchain>=1.0",
 ]
 dev = [
     "mypy>=1.13",
@@ -27,7 +35,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ai_core"]
+packages = ["src/foldmind_ai_core"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/foldmind_ai_core/resources/prompts" = "foldmind_ai_core/resources/prompts"
 
 [tool.ruff]
 line-length = 100

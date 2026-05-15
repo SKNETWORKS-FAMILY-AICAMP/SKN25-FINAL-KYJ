@@ -1,0 +1,23 @@
+{
+  "name": "foldmind-ai-core-outbox",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "REPLACE_ME",
+    "database.password": "REPLACE_ME",
+    "database.dbname": "foldmind_ai_core",
+    "topic.prefix": "foldmind-ai-core",
+    "plugin.name": "pgoutput",
+    "table.include.list": "public.outbox_events",
+    "tombstones.on.delete": "false",
+    "transforms": "outbox",
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.table.field.event.id": "id",
+    "transforms.outbox.table.field.event.key": "event_key",
+    "transforms.outbox.table.field.event.type": "event_type",
+    "transforms.outbox.table.field.event.payload": "payload",
+    "transforms.outbox.route.topic.replacement": "indexing-events",
+    "transforms.outbox.table.fields.additional.placement": "sequence:envelope,event_key:envelope,aggregate_type:envelope,aggregate_id:envelope,event_schema_version:envelope,created_at:envelope"
+  }
+}

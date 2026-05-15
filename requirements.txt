@@ -1,4 +1,13 @@
+alembic>=1.16
+confluent-kafka>=2.6
 fastapi>=0.115
+langgraph>=1.0
+langgraph-checkpoint>=2.1,<5.0
+langgraph-checkpoint-postgres>=2.0
+openai>=2.36,<3.0
 pydantic>=2.8
 pydantic-settings>=2.7
+psycopg[binary]>=3.2
+qdrant-client>=1.12
+neo4j>=5.25
 uvicorn[standard]>=0.30

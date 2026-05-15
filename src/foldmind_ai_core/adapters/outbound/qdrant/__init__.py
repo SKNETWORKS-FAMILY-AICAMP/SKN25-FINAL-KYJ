@@ -1,0 +1,1 @@
+"""Qdrant outbound adapter package."""
