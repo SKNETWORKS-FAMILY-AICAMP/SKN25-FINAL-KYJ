@@ -67,10 +67,10 @@ class ProjectionFactoryTests(unittest.TestCase):
         projection = document_signal_graph_projection_from_profile(profile, signals)
 
         self.assertEqual(projection.document_id, "doc-1")
-        self.assertEqual(projection.signal_generation_version, "signal-set-v1")
+        self.assertEqual(projection.index_input_digest, "index-input-v1")
         self.assertEqual(projection.signals[0].signal_type, "summary")
         self.assertEqual(projection.signals[1].signal_key, "startup")
-        self.assertEqual(projection.metadata["model"], "test-model")
+        self.assertEqual(projection.signals[0].generation_model, "test-model")
 
     def test_document_vector_projection_uses_document_level_signals(self) -> None:
         profile = _profile()
@@ -84,6 +84,7 @@ class ProjectionFactoryTests(unittest.TestCase):
                 document_id="doc-2",
                 source_version="v1",
                 content_digest="content-digest-1",
+                index_input_digest="index-input-v1",
                 signal_type="concept",
                 signal_key="other-document",
                 text="Other document concept",
@@ -129,11 +130,12 @@ class ProjectionFactoryTests(unittest.TestCase):
             signal_type="responsibility",
             signal_key="responsibility",
             text="Folder responsibility matches member documents.",
+            index_input_digest="folder-signal-input-v1",
             attributes={"responsibility_score": 0.82},
             related_document_id="doc-2",
             evidence=({"reason": "outlier"},),
             confidence=0.9,
-            metadata={"model": "folder-model"},
+            generation_model="folder-model",
         )
 
         projection = folder_signal_vector_projection_from_signal(
@@ -152,7 +154,7 @@ class ProjectionFactoryTests(unittest.TestCase):
         self.assertEqual(projection.attributes["responsibility_score"], 0.82)
         self.assertEqual(projection.related_document_id, "doc-2")
         self.assertEqual(projection.evidence[0]["reason"], "outlier")
-        self.assertEqual(projection.metadata["model"], "folder-model")
+        self.assertTrue(projection.index_input_digest)
 
     def test_folder_relationship_projection_uses_only_source_hierarchy(self) -> None:
         folder = SourceFolder(
@@ -212,11 +214,10 @@ def _profile() -> ProjectionDocumentProfile:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
+        index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         title="MVP memo",
-        signal_generation_version="signal-set-v1",
-        model="test-model",
     )
 
 
@@ -228,11 +229,13 @@ def _summary_signal() -> ProjectionDocumentSignal:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
+        index_input_digest="index-input-v1",
         signal_type="summary",
         signal_key="document-summary",
         text="Startup MVP validation summary",
         evidence=(ProjectionSignalEvidence(chunk_id="chunk-1", quote="summary quote"),),
         confidence=0.82,
+        generation_model="test-model",
     )
 
 
@@ -244,11 +247,13 @@ def _concept_signal() -> ProjectionDocumentSignal:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
+        index_input_digest="index-input-v1",
         signal_type="concept",
         signal_key="startup",
         text="customer interview",
         evidence=(ProjectionSignalEvidence(chunk_id="chunk-1", quote="customer quote"),),
         confidence=0.9,
+        generation_model="test-model",
     )
 
 

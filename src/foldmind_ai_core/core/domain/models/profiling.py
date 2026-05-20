@@ -43,6 +43,7 @@ class DocumentSignal:
     document_type: str | None
     document_id: str
     source_version: str
+    index_input_digest: str
     signal_type: DocumentSignalType | str
     signal_key: str
     text: str
@@ -51,6 +52,7 @@ class DocumentSignal:
     confidence: float | None = None
     extractor_name: str = ""
     extractor_version: str = ""
+    generation_model: str | None = None
     metadata: Metadata = field(default_factory=dict)
 
 
@@ -69,8 +71,9 @@ class FolderSignal:
     confidence: float | None = None
     extractor_name: str = ""
     extractor_version: str = ""
+    generation_model: str | None = None
     metadata: Metadata = field(default_factory=dict)
-    folder_signal_input_revision: int = 0
+    index_input_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,8 +85,8 @@ class DocumentProfile:
     created_at: str
     updated_at: str
     title: str
-    signal_generation_version: str
-    model: str = ""
+    index_input_digest: str
+    signal_generation_version: str = "1"
     metadata: Metadata = field(default_factory=dict)
 
 
@@ -97,4 +100,3 @@ class DocumentSignalExtraction:
 class FolderSignalExtraction:
     signals: tuple[FolderSignal, ...]
     signal_generation_version: str = "1"
-    model: str = ""

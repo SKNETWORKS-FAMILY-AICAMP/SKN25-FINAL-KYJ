@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
 from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
+from foldmind_ai_core.shared.canonical_json import json_digest
 from foldmind_ai_core.shared.validation import InvalidInputError
 
 
@@ -48,6 +49,10 @@ class DocumentChunker:
     config: DocumentChunkingConfig
 
     def chunk(self, document: SourceDocument) -> list[DocumentChunk]:
+        index_input_digest = document_index_input_digest(
+            document=document,
+            config=self.config,
+        )
         text = document.full_text
         step = self.config.chunk_size - self.config.chunk_overlap
         chunks: list[DocumentChunk] = []
@@ -65,13 +70,13 @@ class DocumentChunker:
                     document_type=document.document_type,
                     document_id=document.document_id,
                     source_version=document.source_version,
+                    index_input_digest=index_input_digest,
                     created_at=document.created_at,
                     updated_at=document.updated_at,
                     chunk_id=_chunk_id(
                         tenant=document.tenant,
                         document_id=document.document_id,
-                        source_version=document.source_version,
-                        chunking_version=self.config.chunking_version,
+                        index_input_digest=index_input_digest,
                         chunk_index=index,
                     ),
                     chunk_index=index,
@@ -93,16 +98,42 @@ def _chunk_id(
     *,
     tenant: str,
     document_id: str,
-    source_version: str,
-    chunking_version: str,
+    index_input_digest: str,
     chunk_index: int,
 ) -> str:
     return str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
             (
-                f"chunk:{tenant}:{document_id}:{source_version}:"
-                f"{chunking_version}:{chunk_index}"
+                f"chunk:{tenant}:{document_id}:{index_input_digest}:"
+                f"{chunk_index}"
             ),
         )
+    )
+
+
+def document_index_input_digest(
+    *,
+    document: SourceDocument,
+    config: DocumentChunkingConfig,
+) -> str:
+    return json_digest(
+        {
+            "kind": "document_content_index",
+            "content_digest": hashlib.sha256(
+                document.full_text.encode("utf-8")
+            ).hexdigest(),
+            "chunking": {
+                "version": config.chunking_version,
+                "chunk_size": config.chunk_size,
+                "chunk_overlap": config.chunk_overlap,
+            },
+            "embedding": {
+                "model": config.embedding_model,
+                "version": config.embedding_version,
+            },
+            "schema": {
+                "index_schema_version": config.index_schema_version,
+            },
+        }
     )

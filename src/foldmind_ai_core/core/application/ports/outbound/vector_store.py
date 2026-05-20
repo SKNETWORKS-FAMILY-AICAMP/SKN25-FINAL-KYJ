@@ -128,13 +128,13 @@ class SignalVectorStore(Protocol):
         """Delete signal-level vectors for one folder."""
         ...
 
-    def delete_folder_signals_before_input_revision(
+    def delete_stale_folder_signals(
         self,
         *,
         folder_id: str,
-        folder_signal_input_revision: int,
+        current_index_input_digest: str,
     ) -> None:
-        """Delete stale folder signal vectors older than the given revision."""
+        """Delete stale folder signal vectors not matching the current digest."""
         ...
 
     def search_signals(

@@ -5,10 +5,12 @@ CREATE TABLE document_index_records (
     document_id text PRIMARY KEY
         REFERENCES document_sources (document_id)
         ON DELETE CASCADE,
+    index_input_digest text NOT NULL CHECK (
+        length(btrim(index_input_digest)) > 0
+    ),
     signal_generation_version text NOT NULL DEFAULT '1' CHECK (
         length(btrim(signal_generation_version)) > 0
     ),
-    model text NOT NULL DEFAULT '',
     deleted_at timestamptz,
     purge_after timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -28,6 +30,9 @@ CREATE TABLE document_chunks (
     document_id text NOT NULL
         REFERENCES document_sources (document_id)
         ON DELETE CASCADE,
+    index_input_digest text NOT NULL CHECK (
+        length(btrim(index_input_digest)) > 0
+    ),
     chunk_index integer NOT NULL CHECK (chunk_index >= 0),
     text_digest text NOT NULL CHECK (length(btrim(text_digest)) > 0),
     start_offset integer NOT NULL CHECK (start_offset >= 0),
@@ -42,6 +47,9 @@ CREATE TABLE document_signals (
     document_id text NOT NULL
         REFERENCES document_sources (document_id)
         ON DELETE CASCADE,
+    index_input_digest text NOT NULL CHECK (
+        length(btrim(index_input_digest)) > 0
+    ),
     signal_type text NOT NULL CHECK (
         signal_type IN (
             'summary',
@@ -67,6 +75,10 @@ CREATE TABLE document_signals (
     extractor_version text NOT NULL CHECK (
         length(btrim(extractor_version)) > 0
     ),
+    generation_model text CHECK (
+        generation_model IS NULL OR length(btrim(generation_model)) > 0
+    ),
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (document_id, signal_type, signal_key)
 );

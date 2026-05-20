@@ -61,7 +61,8 @@ def project_folder_signals_command(event: OutboxEvent) -> ProjectFolderSignalsCo
     projection_event = folder_signals_indexed_event_from_outbox(event)
     return ProjectFolderSignalsCommand(
         folder=projection_event.folder,
-        folder_signal_input_revision=projection_event.folder_signal_input_revision,
+        index_input_digest=projection_event.index_input_digest,
+        signal_generation_version=projection_event.signal_generation_version,
         signals=projection_event.signals,
     )
 
@@ -69,8 +70,9 @@ def project_folder_signals_command(event: OutboxEvent) -> ProjectFolderSignalsCo
 def invalidate_folder_signals_command(event: OutboxEvent) -> InvalidateFolderSignalsCommand:
     projection_event = folder_signals_invalidated_event_from_outbox(event)
     return InvalidateFolderSignalsCommand(
+        tenant=event.tenant,
         folder_id=projection_event.folder_id,
-        folder_signal_input_revision=projection_event.folder_signal_input_revision,
+        index_input_digest=projection_event.index_input_digest,
     )
 
 

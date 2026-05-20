@@ -62,14 +62,14 @@ class DocumentProfilerAgent:
             document_type=document.document_type,
             document_id=document.document_id,
             source_version=document.source_version,
+            index_input_digest=_index_input_digest(chunks),
             created_at=document.created_at,
             updated_at=document.updated_at,
             title=document.title.strip() or document.document_id,
-            signal_generation_version="1",
-            model=self.model,
             metadata={
                 "source_metadata": dict(document.metadata),
             },
+            signal_generation_version=self.prompt_version,
         )
         signals = self._signals(document=document, chunks=chunks, payload=parsed)
         return DocumentSignalExtraction(profile=profile, signals=signals)
@@ -119,8 +119,14 @@ class DocumentProfilerAgent:
                 "Document profiler response must include at least one signal."
             )
         chunk_ids = {chunk.chunk_id for chunk in chunks}
+        index_input_digest = _index_input_digest(chunks)
         signals = tuple(
-            self._signal(document=document, chunk_ids=chunk_ids, payload=item)
+            self._signal(
+                document=document,
+                chunk_ids=chunk_ids,
+                index_input_digest=index_input_digest,
+                payload=item,
+            )
             for item in values
         )
         summary_count = sum(
@@ -144,6 +150,7 @@ class DocumentProfilerAgent:
         *,
         document: SourceDocument,
         chunk_ids: set[str],
+        index_input_digest: str,
         payload: object,
     ) -> DocumentSignal:
         signal_payload = self._json_object(payload, "signal")
@@ -155,6 +162,7 @@ class DocumentProfilerAgent:
             document_type=document.document_type,
             document_id=document.document_id,
             source_version=document.source_version,
+            index_input_digest=index_input_digest,
             signal_type=signal_type,
             text=text,
             attributes=self._optional_json_object(
@@ -165,6 +173,7 @@ class DocumentProfilerAgent:
             confidence=self._required_confidence(signal_payload, "confidence"),
             extractor_name="document_profiler",
             extractor_version=self.prompt_version,
+            generation_model=self.model,
             metadata=self._optional_json_object(
                 signal_payload.get("metadata"),
                 "signal metadata",
@@ -274,3 +283,9 @@ class DocumentProfilerAgent:
                 f"Document profiler {name} must be a JSON object."
             )
         return cast(JsonObject, dict(value))
+
+
+def _index_input_digest(chunks: list[DocumentChunk]) -> str:
+    if not chunks:
+        raise InvalidAgentOutputError("Document profiler requires at least one chunk.")
+    return chunks[0].index_input_digest

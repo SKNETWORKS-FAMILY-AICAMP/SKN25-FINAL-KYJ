@@ -34,8 +34,10 @@ class DocumentSignalNodeProjection:
     document_id: str
     source_version: str
     content_digest: str
+    index_input_digest: str
     attributes: Metadata = field(default_factory=dict)
     confidence: float | None = None
+    generation_model: str | None = None
     metadata: Metadata = field(default_factory=dict)
 
 
@@ -46,10 +48,11 @@ class DocumentSignalProjection:
     document_id: str
     source_version: str
     content_digest: str
+    index_input_digest: str
     created_at: str
     updated_at: str
     title: str
-    signal_generation_version: str
+    signal_generation_version: str = "1"
     signals: tuple[DocumentSignalNodeProjection, ...] = ()
     metadata: Metadata = field(default_factory=dict)
 
@@ -78,8 +81,9 @@ class FolderSignalNodeProjection:
     related_document_id: str | None = None
     attributes: Metadata = field(default_factory=dict)
     confidence: float | None = None
+    generation_model: str | None = None
+    index_input_digest: str = ""
     metadata: Metadata = field(default_factory=dict)
-    folder_signal_input_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,5 +91,6 @@ class FolderSignalProjection:
     tenant: str
     folder_id: str
     source_version: str
+    index_input_digest: str
+    signal_generation_version: str = "1"
     signals: tuple[FolderSignalNodeProjection, ...] = ()
-    folder_signal_input_revision: int = 0

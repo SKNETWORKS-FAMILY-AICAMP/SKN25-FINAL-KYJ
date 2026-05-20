@@ -26,6 +26,7 @@ class ProfileDomainTests(unittest.TestCase):
                 document_type="document",
                 document_id="doc-1",
                 source_version="v1",
+                index_input_digest="index-input-v1",
                 signal_type=DocumentSignalType.CONCEPT,
                 text="Startup",
                 attributes={"label": "Startup"},
@@ -42,6 +43,7 @@ class ProfileDomainTests(unittest.TestCase):
                 document_type="document",
                 document_id="doc-1",
                 source_version="v1",
+                index_input_digest="index-input-v1",
                 signal_type="unsupported",
                 text="Unsupported",
                 attributes={},
@@ -57,6 +59,7 @@ class ProfileDomainTests(unittest.TestCase):
                 document_type="document",
                 document_id="doc-1",
                 source_version="v1",
+                index_input_digest="index-input-v1",
                 signal_type=DocumentSignalType.SUMMARY,
                 text=" ",
                 attributes={},
@@ -72,6 +75,7 @@ class ProfileDomainTests(unittest.TestCase):
                 document_type="document",
                 document_id="doc-1",
                 source_version="v1",
+                index_input_digest="index-input-v1",
                 signal_type=DocumentSignalType.SUMMARY,
                 text="Summary",
                 attributes={},
@@ -81,18 +85,18 @@ class ProfileDomainTests(unittest.TestCase):
                 confidence=0.8,
             )
 
-    def test_signal_id_is_deterministic_for_same_source_version_type_and_key(self) -> None:
+    def test_signal_id_is_deterministic_for_same_index_input_digest_type_and_key(self) -> None:
         first = document_signal_id(
             tenant="tenant-1",
             document_id="doc-1",
-            source_version="v1",
+            index_input_digest="index-input-v1",
             signal_type=DocumentSignalType.CONCEPT,
             signal_key="startup",
         )
         second = document_signal_id(
             tenant="tenant-1",
             document_id="doc-1",
-            source_version="v1",
+            index_input_digest="index-input-v1",
             signal_type="concept",
             signal_key="startup",
         )
@@ -103,14 +107,14 @@ class ProfileDomainTests(unittest.TestCase):
         first_signal_id = document_signal_id(
             tenant="tenant-1",
             document_id="doc-1",
-            source_version="v1",
+            index_input_digest="index-input-v1",
             signal_type=DocumentSignalType.CONCEPT,
             signal_key="startup",
         )
         second_signal_id = document_signal_id(
             tenant="tenant-1",
             document_id="doc-1",
-            source_version="v1",
+            index_input_digest="index-input-v1",
             signal_type=DocumentSignalType.CONCEPT,
             signal_key="startup",
         )
@@ -143,6 +147,7 @@ class ProfileDomainTests(unittest.TestCase):
             confidence=0.7,
             extractor_name="folder_evaluator",
             extractor_version="prompt-v1",
+            index_input_digest="folder-signal-input-v1",
         )
 
         self.assertEqual(
@@ -150,7 +155,7 @@ class ProfileDomainTests(unittest.TestCase):
             folder_signal_id(
                 tenant="tenant-1",
                 folder_id="folder-1",
-                source_version="v1",
+                index_input_digest="folder-signal-input-v1",
                 signal_type=FolderSignalType.RESPONSIBILITY,
                 signal_key="responsibility",
             ),

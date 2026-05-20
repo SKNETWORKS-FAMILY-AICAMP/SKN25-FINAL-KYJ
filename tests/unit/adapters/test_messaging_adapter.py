@@ -573,6 +573,7 @@ def _document_indexed_event():
         document_type=document.document_type,
         document_id=document.document_id,
         source_version=document.source_version,
+        index_input_digest="index-input-v1",
         created_at=document.created_at,
         updated_at=document.updated_at,
         chunk_id="chunk-1",
@@ -594,7 +595,7 @@ def _document_indexed_event():
         created_at=document.created_at,
         updated_at=document.updated_at,
         title=document.title,
-        signal_generation_version="signal-set-v1",
+        index_input_digest=chunk.index_input_digest,
     )
     return document_indexed_event(
         document=document,
@@ -625,6 +626,7 @@ def _summary_signal(
         document_type=document.document_type,
         document_id=document.document_id,
         source_version=document.source_version,
+        index_input_digest=chunk.index_input_digest,
         signal_type=DocumentSignalType.SUMMARY,
         text="Summary",
         attributes={},

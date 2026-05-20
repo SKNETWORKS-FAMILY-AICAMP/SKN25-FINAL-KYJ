@@ -40,14 +40,17 @@ class FolderIndexedProjectionEvent:
 @dataclass(frozen=True, slots=True)
 class FolderSignalsIndexedProjectionEvent:
     folder: ProjectionFolder
-    folder_signal_input_revision: int
+    index_input_digest: str
+    signal_generation_version: str = "1"
     signals: tuple[ProjectionFolderSignal, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class FolderSignalsInvalidatedProjectionEvent:
+    tenant: str
     folder_id: str
-    folder_signal_input_revision: int
+    index_input_digest: str
+    signal_generation_version: str = "1"
 
 
 @dataclass(frozen=True, slots=True)

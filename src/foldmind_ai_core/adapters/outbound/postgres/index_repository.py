@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from typing import Any
 
 from foldmind_ai_core.adapters.outbound.postgres.client import jsonb
@@ -26,6 +27,7 @@ from foldmind_ai_core.core.domain.models.profiling import (
 )
 from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
 from foldmind_ai_core.core.domain.models.reference.folders import SourceFolder
+from foldmind_ai_core.shared.canonical_json import json_digest
 
 _UPSERT_TENANT_STATE_SQL = """
 INSERT INTO tenant_storage_scopes (tenant_id, updated_at)
@@ -133,8 +135,8 @@ WHERE document_id = %s
 _UPSERT_DOCUMENT_PROFILE_SQL = """
 INSERT INTO document_index_records (
     document_id,
+    index_input_digest,
     signal_generation_version,
-    model,
     deleted_at,
     purge_after,
     updated_at
@@ -144,8 +146,8 @@ VALUES (
 )
 ON CONFLICT (document_id)
 DO UPDATE SET
+    index_input_digest = EXCLUDED.index_input_digest,
     signal_generation_version = EXCLUDED.signal_generation_version,
-    model = EXCLUDED.model,
     deleted_at = NULL,
     purge_after = NULL,
     updated_at = now()
@@ -160,12 +162,13 @@ _INSERT_DOCUMENT_CHUNK_SQL = """
 INSERT INTO document_chunks (
     chunk_id,
     document_id,
+    index_input_digest,
     chunk_index,
     text_digest,
     start_offset,
     end_offset
 )
-VALUES (%s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s)
 """
 
 _DELETE_DOCUMENT_SIGNALS_SQL = """
@@ -177,6 +180,7 @@ _INSERT_DOCUMENT_SIGNAL_SQL = """
 INSERT INTO document_signals (
     signal_id,
     document_id,
+    index_input_digest,
     signal_type,
     signal_key,
     text,
@@ -185,12 +189,14 @@ INSERT INTO document_signals (
     confidence,
     extractor_name,
     extractor_version,
+    generation_model,
     updated_at
 )
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
 ON CONFLICT (signal_id)
 DO UPDATE SET
     document_id = EXCLUDED.document_id,
+    index_input_digest = EXCLUDED.index_input_digest,
     signal_type = EXCLUDED.signal_type,
     signal_key = EXCLUDED.signal_key,
     text = EXCLUDED.text,
@@ -199,6 +205,7 @@ DO UPDATE SET
     confidence = EXCLUDED.confidence,
     extractor_name = EXCLUDED.extractor_name,
     extractor_version = EXCLUDED.extractor_version,
+    generation_model = EXCLUDED.generation_model,
     updated_at = now()
 """
 
@@ -247,16 +254,49 @@ DELETE FROM folder_signals
 WHERE folder_id = ANY(%s)
 """
 
-_MARK_AFFECTED_FOLDER_SIGNALS_PENDING_SQL = """
+_MARK_FOLDER_SIGNALS_PENDING_SQL = """
 UPDATE folder_index_records fir
-SET folder_signal_input_revision = folder_signal_input_revision + 1,
+SET index_input_digest = %s,
     folder_signal_refresh_status = 'pending',
     updated_at = now()
 FROM folder_sources fs
-WHERE fir.folder_id = ANY(%s)
+WHERE fir.folder_id = %s
   AND fir.folder_id = fs.folder_id
   AND fir.deleted_at IS NULL
-RETURNING fs.tenant_id, fir.folder_id, fir.folder_signal_input_revision
+RETURNING fs.tenant_id, fir.folder_id, fir.index_input_digest, fir.signal_generation_version
+"""
+
+_SELECT_FOLDER_SIGNAL_DIGEST_SOURCE_SQL = """
+SELECT
+    source_version,
+    name,
+    path,
+    parent_folder_id,
+    description,
+    metadata
+FROM folder_sources
+WHERE tenant_id = %s
+  AND folder_id = %s
+  AND deleted_at IS NULL
+"""
+
+_SELECT_FOLDER_SIGNAL_DIGEST_MEMBERS_SQL = """
+SELECT
+    ds.document_id,
+    ds.source_version,
+    ds.content_digest,
+    COALESCE(dir.index_input_digest, '') AS index_input_digest
+FROM source_document_folder_relations rel
+JOIN document_sources ds
+  ON ds.tenant_id = rel.tenant_id
+ AND ds.document_id = rel.document_id
+LEFT JOIN document_index_records dir
+  ON dir.document_id = ds.document_id
+ AND dir.deleted_at IS NULL
+WHERE rel.tenant_id = %s
+  AND rel.folder_id = %s
+  AND ds.deleted_at IS NULL
+ORDER BY ds.document_id
 """
 
 _UPSERT_FOLDER_SOURCE_SQL = """
@@ -303,8 +343,8 @@ WHERE folder_id = %s
 _UPSERT_FOLDER_INDEX_SQL = """
 INSERT INTO folder_index_records (
     folder_id,
+    index_input_digest,
     signal_generation_version,
-    model,
     folder_signal_refresh_status,
     deleted_at,
     purge_after,
@@ -313,8 +353,8 @@ INSERT INTO folder_index_records (
 VALUES (%s, %s, %s, %s, NULL, NULL, now())
 ON CONFLICT (folder_id)
 DO UPDATE SET
+    index_input_digest = EXCLUDED.index_input_digest,
     signal_generation_version = EXCLUDED.signal_generation_version,
-    model = EXCLUDED.model,
     folder_signal_refresh_status = EXCLUDED.folder_signal_refresh_status,
     deleted_at = NULL,
     purge_after = NULL,
@@ -330,7 +370,7 @@ _INSERT_FOLDER_SIGNAL_SQL = """
 INSERT INTO folder_signals (
     signal_id,
     folder_id,
-    folder_signal_input_revision,
+    index_input_digest,
     signal_type,
     signal_key,
     text,
@@ -340,13 +380,14 @@ INSERT INTO folder_signals (
     confidence,
     extractor_name,
     extractor_version,
+    generation_model,
     updated_at
 )
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
 ON CONFLICT (signal_id)
 DO UPDATE SET
     folder_id = EXCLUDED.folder_id,
-    folder_signal_input_revision = EXCLUDED.folder_signal_input_revision,
+    index_input_digest = EXCLUDED.index_input_digest,
     signal_type = EXCLUDED.signal_type,
     signal_key = EXCLUDED.signal_key,
     text = EXCLUDED.text,
@@ -356,6 +397,7 @@ DO UPDATE SET
     confidence = EXCLUDED.confidence,
     extractor_name = EXCLUDED.extractor_name,
     extractor_version = EXCLUDED.extractor_version,
+    generation_model = EXCLUDED.generation_model,
     updated_at = now()
 """
 
@@ -363,6 +405,13 @@ _SELECT_FOLDER_DELETE_IDENTITY_SQL = """
 SELECT tenant_id, folder_id
 FROM folder_sources
 WHERE folder_id = %s
+"""
+
+_SELECT_FOLDER_TENANT_SQL = """
+SELECT tenant_id
+FROM folder_sources
+WHERE folder_id = %s
+  AND deleted_at IS NULL
 """
 
 _MARK_FOLDER_SOURCE_DELETED_SQL = """
@@ -383,7 +432,7 @@ WHERE folder_id = %s
 """
 
 _SELECT_FOLDER_SIGNAL_INPUT_REVISION_SQL = """
-SELECT fir.folder_signal_input_revision
+SELECT fir.index_input_digest
 FROM folder_index_records fir
 JOIN folder_sources fs ON fs.folder_id = fir.folder_id
 WHERE fs.tenant_id = %s
@@ -393,14 +442,13 @@ WHERE fs.tenant_id = %s
 
 _MARK_FOLDER_SIGNALS_READY_SQL = """
 UPDATE folder_index_records
-SET signal_generation_version = %s,
-    model = %s,
-    folder_signal_refresh_status = 'ready',
+SET folder_signal_refresh_status = 'ready',
+    signal_generation_version = %s,
     updated_at = now()
 WHERE folder_id = %s
-  AND folder_signal_input_revision = %s
+  AND index_input_digest = %s
   AND deleted_at IS NULL
-RETURNING folder_signal_input_revision
+RETURNING index_input_digest
 """
 
 
@@ -444,8 +492,8 @@ class PostgresIndexRepository:
             _UPSERT_DOCUMENT_PROFILE_SQL,
             (
                 document.document_id,
+                profile.index_input_digest,
                 profile.signal_generation_version,
-                profile.model,
             ),
         )
         conn.execute(_DELETE_DOCUMENT_CHUNKS_SQL, (document.document_id,))
@@ -455,6 +503,7 @@ class PostgresIndexRepository:
                 (
                     chunk.chunk_id,
                     document.document_id,
+                    chunk.index_input_digest,
                     chunk.chunk_index,
                     chunk.text_hash,
                     chunk.start_offset,
@@ -602,12 +651,17 @@ class PostgresIndexRepository:
             folder=folder,
         ):
             return FolderIndexChange(applied=False)
+        index_input_digest = self._folder_signal_index_input_digest(
+            conn,
+            tenant=tenant,
+            folder_id=folder.folder_id,
+        )
         conn.execute(
             _UPSERT_FOLDER_INDEX_SQL,
             (
                 folder.folder_id,
+                index_input_digest,
                 "1",
-                "",
                 "empty",
             ),
         )
@@ -621,20 +675,20 @@ class PostgresIndexRepository:
             folder_signal_invalidation=invalidations[0] if invalidations else None,
         )
 
-    def current_folder_signal_input_revision_with_connection(
+    def current_folder_index_input_digest_with_connection(
         self,
         conn: Any,
         *,
         tenant: str,
         folder_id: str,
-    ) -> int | None:
+    ) -> str | None:
         row = conn.execute(
             _SELECT_FOLDER_SIGNAL_INPUT_REVISION_SQL,
             (tenant, folder_id),
         ).fetchone()
         if row is None:
             return None
-        return int(row[0])
+        return str(row[0])
 
     def replace_folder_signals_with_connection(
         self,
@@ -642,26 +696,26 @@ class PostgresIndexRepository:
         *,
         folder: SourceFolder,
         signals: tuple[FolderSignal, ...],
-        expected_input_revision: int,
+        expected_index_input_digest: str,
+        signal_generation_version: str,
     ) -> FolderSignalRefreshCommit:
         if not self._folder_source_is_current(conn, folder=folder):
             return FolderSignalRefreshCommit(
                 applied=False,
-                folder_signal_input_revision=expected_input_revision,
+                index_input_digest=expected_index_input_digest,
             )
         row = conn.execute(
             _MARK_FOLDER_SIGNALS_READY_SQL,
             (
-                _signal_generation_version(signals),
-                _signal_model(signals),
+                signal_generation_version,
                 folder.folder_id,
-                expected_input_revision,
+                expected_index_input_digest,
             ),
         ).fetchone()
         if row is None:
             return FolderSignalRefreshCommit(
                 applied=False,
-                folder_signal_input_revision=expected_input_revision,
+                index_input_digest=expected_index_input_digest,
             )
         conn.execute(_DELETE_FOLDER_SIGNALS_SQL, (folder.folder_id,))
         self._insert_folder_signals_with_connection(
@@ -671,7 +725,7 @@ class PostgresIndexRepository:
         )
         return FolderSignalRefreshCommit(
             applied=True,
-            folder_signal_input_revision=int(row[0]),
+            index_input_digest=str(row[0]),
         )
 
     def mark_folder_deleted_with_connection(
@@ -785,17 +839,90 @@ class PostgresIndexRepository:
     ) -> tuple[FolderSignalInvalidation, ...]:
         if not folder_ids:
             return ()
-        rows = conn.execute(
-            _MARK_AFFECTED_FOLDER_SIGNALS_PENDING_SQL,
-            (list(folder_ids),),
-        ).fetchall()
-        return tuple(
-            FolderSignalInvalidation(
-                tenant=str(row[0]),
-                folder_id=str(row[1]),
-                folder_signal_input_revision=int(row[2]),
+        invalidations: list[FolderSignalInvalidation] = []
+        for folder_id in folder_ids:
+            tenant = self._folder_tenant(conn, folder_id=folder_id)
+            if tenant is None:
+                continue
+            index_input_digest = self._folder_signal_index_input_digest(
+                conn,
+                tenant=tenant,
+                folder_id=folder_id,
             )
-            for row in rows
+            row = conn.execute(
+                _MARK_FOLDER_SIGNALS_PENDING_SQL,
+                (index_input_digest, folder_id),
+            ).fetchone()
+            if row is None:
+                continue
+            invalidations.append(
+                FolderSignalInvalidation(
+                    tenant=str(row[0]),
+                    folder_id=str(row[1]),
+                    index_input_digest=str(row[2]),
+                    signal_generation_version=str(row[3]),
+                )
+            )
+        return tuple(invalidations)
+
+    def _folder_tenant(
+        self,
+        conn: Any,
+        *,
+        folder_id: str,
+    ) -> str | None:
+        row = conn.execute(_SELECT_FOLDER_TENANT_SQL, (folder_id,)).fetchone()
+        if row is None:
+            return None
+        return str(row[0])
+
+    def _folder_signal_index_input_digest(
+        self,
+        conn: Any,
+        *,
+        tenant: str,
+        folder_id: str,
+    ) -> str:
+        source_row = conn.execute(
+            _SELECT_FOLDER_SIGNAL_DIGEST_SOURCE_SQL,
+            (tenant, folder_id),
+        ).fetchone()
+        folder_payload: dict[str, object]
+        if source_row is None:
+            folder_payload = {
+                "folder_id": folder_id,
+                "source_missing": True,
+            }
+        else:
+            folder_payload = {
+                "source_version": str(source_row[0]),
+                "name": str(source_row[1]),
+                "path": _optional_string(source_row[2]),
+                "parent_folder_id": _optional_string(source_row[3]),
+                "description": str(source_row[4]),
+                "metadata": _json_object(source_row[5]),
+            }
+        member_rows = conn.execute(
+            _SELECT_FOLDER_SIGNAL_DIGEST_MEMBERS_SQL,
+            (tenant, folder_id),
+        ).fetchall()
+        members = [
+            {
+                "document_id": str(row[0]),
+                "source_version": str(row[1]),
+                "content_digest": str(row[2]),
+                "index_input_digest": str(row[3]),
+            }
+            for row in member_rows
+        ]
+        return json_digest(
+            {
+                "kind": "folder_signal_index_input",
+                "tenant": tenant,
+                "folder_id": folder_id,
+                "folder": folder_payload,
+                "members": members,
+            }
         )
 
     def _folder_source_is_current(
@@ -828,6 +955,7 @@ class PostgresIndexRepository:
                 (
                     record.signal_id,
                     document_id,
+                    record.index_input_digest,
                     record.signal_type,
                     record.signal_key,
                     record.text,
@@ -836,6 +964,7 @@ class PostgresIndexRepository:
                     record.confidence,
                     record.extractor_name,
                     record.extractor_version,
+                    record.generation_model,
                 ),
             )
 
@@ -853,7 +982,7 @@ class PostgresIndexRepository:
                 (
                     record.signal_id,
                     folder_id,
-                    record.folder_signal_input_revision,
+                    record.index_input_digest,
                     record.signal_type,
                     record.signal_key,
                     record.text,
@@ -863,12 +992,25 @@ class PostgresIndexRepository:
                     record.confidence,
                     record.extractor_name,
                     record.extractor_version,
+                    record.generation_model,
                 ),
             )
 
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _json_object(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
 
 
 def _normalized_folder_ids(folder_ids: tuple[str, ...]) -> tuple[str, ...]:
@@ -895,19 +1037,3 @@ def _text_tuple_from_rows(rows: list[tuple[Any, ...]]) -> tuple[str, ...]:
         values.append(value)
         seen.add(value)
     return tuple(values)
-
-
-def _signal_generation_version(signals: tuple[FolderSignal, ...]) -> str:
-    for signal in signals:
-        value = signal.metadata.get("signal_generation_version")
-        if isinstance(value, str) and value.strip():
-            return value
-    return "1"
-
-
-def _signal_model(signals: tuple[FolderSignal, ...]) -> str:
-    for signal in signals:
-        value = signal.metadata.get("model")
-        if isinstance(value, str):
-            return value
-    return ""

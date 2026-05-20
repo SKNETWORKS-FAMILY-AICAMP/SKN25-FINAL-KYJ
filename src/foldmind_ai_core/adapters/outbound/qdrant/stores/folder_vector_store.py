@@ -18,6 +18,7 @@ from foldmind_ai_core.core.application.queries.scope_matching import (
 )
 from foldmind_ai_core.core.domain.models.retrieval.results import FolderRetrievalResult
 from foldmind_ai_core.shared.canonical_json import json_digest
+from foldmind_ai_core.shared.internal_ids import stable_internal_id
 from foldmind_ai_core.shared.types import Vector
 
 
@@ -36,7 +37,14 @@ class QdrantFolderVectorStore:
             key=projection.folder_id,
             vector=vector,
             payload=payload,
+            point_id=stable_internal_id(
+                self.client.collection_name,
+                "folder",
+                projection.folder_id,
+                projection.index_input_digest,
+            ),
         )
+        self.delete_folder_vector(folder_id=projection.folder_id)
         self.client.upsert_points([point])
         return VectorWriteResult(
             collection_name=self.client.collection_name,

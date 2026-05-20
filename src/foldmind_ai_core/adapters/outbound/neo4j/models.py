@@ -46,8 +46,10 @@ class Neo4jDocumentSignalNodeRecord:
     document_id: str
     source_version: str
     content_digest: str
+    index_input_digest: str = ""
     attributes_json: str = "{}"
     confidence: float | None = None
+    generation_model: str | None = None
     metadata_json: str = "{}"
 
 
@@ -57,11 +59,12 @@ class Neo4jFolderSignalNodeRecord:
     tenant: str
     folder_id: str
     source_version: str
-    folder_signal_input_revision: int
+    index_input_digest: str
     signal_type: str
     signal_key: str
     text: str
     related_document_id: str | None = None
     attributes_json: str = "{}"
     confidence: float | None = None
+    generation_model: str | None = None
     metadata_json: str = "{}"

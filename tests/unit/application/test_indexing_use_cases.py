@@ -113,7 +113,7 @@ class FakeIndexingTransaction:
                 FolderSignalInvalidation(
                     tenant="tenant-1",
                     folder_id="folder-1",
-                    folder_signal_input_revision=1,
+                    index_input_digest="folder-signal-input-v1",
                 ),
             ),
         )
@@ -127,27 +127,28 @@ class FakeIndexingTransaction:
         self.operations.append("upsert_folder_index")
         return self.folder_index_change
 
-    def current_folder_signal_input_revision(
+    def current_folder_index_input_digest(
         self,
         *,
         tenant: str,
         folder_id: str,
-    ) -> int | None:
-        self.operations.append("current_folder_signal_input_revision")
-        return 1
+    ) -> str | None:
+        self.operations.append("current_folder_index_input_digest")
+        return "folder-signal-input-v1"
 
     def replace_folder_signals(
         self,
         *,
         folder: SourceFolder,
         signals: tuple[object, ...],
-        expected_input_revision: int,
+        expected_index_input_digest: str,
+        signal_generation_version: str,
     ) -> FolderSignalRefreshCommit:
         self.folder_indexes.append(folder)
         self.operations.append("replace_folder_signals")
         commit = self.folder_signal_refresh_commit or FolderSignalRefreshCommit(
             applied=True,
-            folder_signal_input_revision=expected_input_revision,
+            index_input_digest=expected_index_input_digest,
         )
         if commit.applied:
             self.folder_signals = list(signals)
@@ -186,13 +187,14 @@ class FakeDocumentProfiler:
             created_at=document.created_at,
             updated_at=document.updated_at,
             title=document.title or document.document_id,
-            signal_generation_version="1",
+            index_input_digest=chunks[0].index_input_digest,
         )
         signal = create_document_signal(
             tenant=document.tenant,
             document_type=document.document_type,
             document_id=document.document_id,
             source_version=document.source_version,
+            index_input_digest=chunks[0].index_input_digest,
             signal_type=DocumentSignalType.SUMMARY,
             text="Document summary",
             attributes={},
@@ -205,6 +207,7 @@ class FakeDocumentProfiler:
             confidence=0.8,
             extractor_name="fake_profiler",
             extractor_version="test-v1",
+            generation_model="fake-model",
         )
         return DocumentSignalExtraction(profile=profile, signals=(signal,))
 
@@ -242,11 +245,12 @@ class FakeFolderSignalExtractor:
             confidence=0.9,
             extractor_name="fake_folder_evaluator",
             extractor_version="test-v1",
+            generation_model="folder-model",
+            index_input_digest="pending-folder-signal-input",
         )
         return FolderSignalExtraction(
             signals=(signal,),
             signal_generation_version="folder-signals-v1",
-            model="folder-model",
         )
 
 
@@ -415,12 +419,12 @@ class IndexingUseCaseTests(unittest.TestCase):
                 FolderSignalInvalidation(
                     tenant="tenant-1",
                     folder_id="old-folder",
-                    folder_signal_input_revision=3,
+                    index_input_digest="old-folder-signal-input-v3",
                 ),
                 FolderSignalInvalidation(
                     tenant="tenant-1",
                     folder_id="new-folder",
-                    folder_signal_input_revision=1,
+                    index_input_digest="new-folder-signal-input-v1",
                 ),
             ),
         )
@@ -479,7 +483,7 @@ class IndexingUseCaseTests(unittest.TestCase):
             folder_signal_invalidation=FolderSignalInvalidation(
                 tenant="tenant-1",
                 folder_id="folder-1",
-                folder_signal_input_revision=2,
+                index_input_digest="folder-signal-input-v2",
             ),
         )
 
@@ -496,7 +500,8 @@ class IndexingUseCaseTests(unittest.TestCase):
             {
                 "tenant": "tenant-1",
                 "folder_id": "folder-1",
-                "folder_signal_input_revision": 2,
+                "index_input_digest": "folder-signal-input-v2",
+                "signal_generation_version": "1",
             },
         )
 
@@ -517,6 +522,7 @@ class IndexingUseCaseTests(unittest.TestCase):
         self.assertEqual(chunks[0].embedding_model, TEST_EMBEDDING_MODEL)
         self.assertEqual(chunks[0].embedding_version, TEST_EMBEDDING_VERSION)
         self.assertEqual(chunks[0].index_schema_version, TEST_INDEX_SCHEMA_VERSION)
+        self.assertTrue(chunks[0].index_input_digest)
         self.assertEqual(
             [(chunk.start_offset, chunk.end_offset) for chunk in chunks],
             [(0, 4), (3, 7), (6, 7)],
@@ -599,21 +605,20 @@ class IndexingUseCaseTests(unittest.TestCase):
         )
 
         self.assertEqual(result.signal_count, 1)
-        self.assertEqual(uow.tx.folder_signals[0].metadata["signal_generation_version"], "folder-signals-v1")
-        self.assertEqual(uow.tx.folder_signals[0].metadata["model"], "folder-model")
-        self.assertEqual(uow.tx.folder_signals[0].folder_signal_input_revision, 1)
+        self.assertEqual(uow.tx.folder_signals[0].generation_model, "folder-model")
+        self.assertEqual(uow.tx.folder_signals[0].index_input_digest, "folder-signal-input-v1")
         self.assertEqual([event.event_type for event in uow.tx.events], ["FOLDER_SIGNALS_INDEXED"])
         self.assertEqual(uow.tx.events[0].payload["signals"][0]["text"], "Folder responsibility matches member documents.")
         self.assertEqual(
             uow.tx.operations,
-            ["current_folder_signal_input_revision", "replace_folder_signals", "append_outbox"],
+            ["current_folder_index_input_digest", "replace_folder_signals", "append_outbox"],
         )
 
     def test_folder_responsibility_evaluation_discards_raced_revision(self) -> None:
         uow = FakeIndexingUnitOfWork()
         uow.tx.folder_signal_refresh_commit = FolderSignalRefreshCommit(
             applied=False,
-            folder_signal_input_revision=1,
+            index_input_digest="folder-signal-input-v1",
         )
 
         result = EvaluateFolderResponsibilityUseCase(
@@ -632,7 +637,7 @@ class IndexingUseCaseTests(unittest.TestCase):
         self.assertEqual(uow.tx.events, [])
         self.assertEqual(
             uow.tx.operations,
-            ["current_folder_signal_input_revision", "replace_folder_signals"],
+            ["current_folder_index_input_digest", "replace_folder_signals"],
         )
 
     def test_folder_responsibility_evaluation_requires_existing_folder(self) -> None:

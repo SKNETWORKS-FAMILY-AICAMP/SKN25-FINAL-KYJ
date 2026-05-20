@@ -100,13 +100,13 @@ class PostgresIndexingTransaction:
             folder=folder,
         )
 
-    def current_folder_signal_input_revision(
+    def current_folder_index_input_digest(
         self,
         *,
         tenant: str,
         folder_id: str,
-    ) -> int | None:
-        return self.index_repository.current_folder_signal_input_revision_with_connection(
+    ) -> str | None:
+        return self.index_repository.current_folder_index_input_digest_with_connection(
             self.conn,
             tenant=tenant,
             folder_id=folder_id,
@@ -117,13 +117,15 @@ class PostgresIndexingTransaction:
         *,
         folder: SourceFolder,
         signals: tuple[FolderSignal, ...],
-        expected_input_revision: int,
+        expected_index_input_digest: str,
+        signal_generation_version: str,
     ) -> FolderSignalRefreshCommit:
         return self.index_repository.replace_folder_signals_with_connection(
             self.conn,
             folder=folder,
             signals=signals,
-            expected_input_revision=expected_input_revision,
+            expected_index_input_digest=expected_index_input_digest,
+            signal_generation_version=signal_generation_version,
         )
 
     def mark_folder_deleted(self, *, folder_id: str) -> DeletedFolderIdentity | None:

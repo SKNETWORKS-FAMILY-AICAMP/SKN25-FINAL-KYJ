@@ -10,6 +10,7 @@ class QdrantDocumentChunkPayload:
     document_id: str
     source_version: str
     content_digest: str
+    index_input_digest: str
     created_at: str
     updated_at: str
     chunk_id: str
@@ -32,6 +33,7 @@ class QdrantDocumentPayload:
     document_id: str
     source_version: str
     content_digest: str
+    index_input_digest: str
     created_at: str
     updated_at: str
     embedding_input_hash: str
@@ -48,12 +50,12 @@ class QdrantSignalPayload:
     document_type: str | None
     document_id: str | None
     folder_id: str | None
-    folder_signal_input_revision: int | None
     signal_type: str
     signal_key: str
     text: str
     source_version: str
     content_digest: str | None
+    index_input_digest: str
     related_document_id: str | None
     attributes: JsonObject
     evidence: tuple[JsonObject, ...]
@@ -70,6 +72,7 @@ class QdrantFolderPayload:
     tenant: str
     folder_id: str
     source_version: str
+    index_input_digest: str
     created_at: str
     updated_at: str
     embedding_input_hash: str

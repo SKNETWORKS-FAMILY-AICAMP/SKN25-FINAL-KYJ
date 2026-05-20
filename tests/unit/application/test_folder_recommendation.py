@@ -252,11 +252,11 @@ class FakeGraphStore:
     def delete_folder_signals(self, *, folder_id: str) -> None:
         raise AssertionError("Folder signal deletes are not expected in these tests.")
 
-    def delete_folder_signals_before_input_revision(
+    def delete_stale_folder_signals(
         self,
         *,
         folder_id: str,
-        folder_signal_input_revision: int,
+        current_index_input_digest: str,
     ) -> None:
         raise AssertionError("Folder signal deletes are not expected in these tests.")
 
@@ -632,6 +632,7 @@ def _chunk(*, document_id: str) -> DocumentChunk:
         document_type="document",
         document_id=document_id,
         source_version="v1",
+        index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id=f"{document_id}:chunk:0",

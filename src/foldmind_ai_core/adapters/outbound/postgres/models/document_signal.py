@@ -8,6 +8,7 @@ from foldmind_ai_core.shared.types import JsonObject
 @dataclass(frozen=True, slots=True)
 class PostgresDocumentSignalRecord:
     signal_id: str
+    index_input_digest: str
     signal_type: str
     signal_key: str
     text: str
@@ -16,13 +17,14 @@ class PostgresDocumentSignalRecord:
     confidence: float | None = None
     extractor_name: str = ""
     extractor_version: str = ""
+    generation_model: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class PostgresFolderSignalRecord:
     signal_id: str
     folder_id: str
-    folder_signal_input_revision: int
+    index_input_digest: str
     signal_type: str
     signal_key: str
     text: str
@@ -32,3 +34,4 @@ class PostgresFolderSignalRecord:
     confidence: float | None = None
     extractor_name: str = ""
     extractor_version: str = ""
+    generation_model: str | None = None

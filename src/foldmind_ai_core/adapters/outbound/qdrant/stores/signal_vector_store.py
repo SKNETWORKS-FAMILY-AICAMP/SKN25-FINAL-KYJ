@@ -102,22 +102,24 @@ class QdrantSignalVectorStore:
             )
         )
 
-    def delete_folder_signals_before_input_revision(
+    def delete_stale_folder_signals(
         self,
         *,
         folder_id: str,
-        folder_signal_input_revision: int,
+        current_index_input_digest: str,
     ) -> None:
         self.client.delete_by_filter(
             self.client._models.Filter(
                 must=[
                     self.client._match_value_condition("owner_kind", "folder"),
                     self.client._match_value_condition("folder_id", folder_id),
-                    self.client._models.FieldCondition(
-                        key="folder_signal_input_revision",
-                        range=self.client._models.Range(lt=folder_signal_input_revision),
-                    ),
-                ]
+                ],
+                must_not=[
+                    self.client._match_value_condition(
+                        "index_input_digest",
+                        current_index_input_digest,
+                    )
+                ],
             )
         )
 
@@ -169,9 +171,11 @@ class QdrantSignalVectorStore:
                 vector=vector,
                 payload=payload,
                 point_id=_signal_point_id(
+                    collection_name=self.client.collection_name,
                     owner_kind=owner_kind,
                     owner_id=_signal_owner_id(signal),
                     signal_id=signal.signal_id,
+                    index_input_digest=signal.index_input_digest,
                 ),
             )
             for signal, vector, payload in zip(signals, vectors, payloads, strict=True)
@@ -195,5 +199,19 @@ def _signal_owner_id(
     return signal.folder_id
 
 
-def _signal_point_id(*, owner_kind: str, owner_id: str, signal_id: str) -> str:
-    return stable_internal_id("signal-vector", owner_kind, owner_id, signal_id)
+def _signal_point_id(
+    *,
+    collection_name: str,
+    owner_kind: str,
+    owner_id: str,
+    signal_id: str,
+    index_input_digest: str,
+) -> str:
+    return stable_internal_id(
+        collection_name,
+        "signal-vector",
+        owner_kind,
+        owner_id,
+        signal_id,
+        index_input_digest,
+    )

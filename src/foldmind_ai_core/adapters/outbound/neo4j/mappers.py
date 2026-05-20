@@ -94,8 +94,10 @@ def document_signal_record_from_projection(
         document_id=signal.document_id,
         source_version=signal.source_version,
         content_digest=signal.content_digest,
+        index_input_digest=signal.index_input_digest,
         attributes_json=json.dumps(signal.attributes, ensure_ascii=False),
         confidence=signal.confidence,
+        generation_model=signal.generation_model,
         metadata_json=json.dumps(signal.metadata, ensure_ascii=False),
     )
 
@@ -108,13 +110,14 @@ def folder_signal_record_from_projection(
         tenant=signal.tenant,
         folder_id=signal.folder_id,
         source_version=signal.source_version,
-        folder_signal_input_revision=signal.folder_signal_input_revision,
+        index_input_digest=signal.index_input_digest,
         signal_type=signal.signal_type,
         signal_key=signal.signal_key,
         text=signal.text,
         related_document_id=signal.related_document_id,
         attributes_json=json.dumps(signal.attributes, ensure_ascii=False),
         confidence=signal.confidence,
+        generation_model=signal.generation_model,
         metadata_json=json.dumps(signal.metadata, ensure_ascii=False),
     )
 
@@ -151,6 +154,7 @@ def signal_relationship(
                 "signal_id": signal.signal_id,
                 "source_version": projection.source_version,
                 "content_digest": projection.content_digest,
+                "index_input_digest": projection.index_input_digest,
                 "signal_generation_version": projection.signal_generation_version,
                 **projection.metadata,
             },
@@ -171,7 +175,7 @@ def folder_signal_relationship(
             {
                 "signal_id": signal.signal_id,
                 "source_version": projection.source_version,
-                "folder_signal_input_revision": projection.folder_signal_input_revision,
+                "index_input_digest": projection.index_input_digest,
             },
             ensure_ascii=False,
         ),

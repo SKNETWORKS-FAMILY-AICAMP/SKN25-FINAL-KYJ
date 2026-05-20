@@ -24,9 +24,10 @@ INSERT INTO vector_projection_records (
     source_id,
     vector_item_kind,
     vector_item_id,
+    index_input_digest,
     updated_at
 )
-VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
 ON CONFLICT (collection_name, point_id)
 DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -34,6 +35,7 @@ DO UPDATE SET
     source_id = EXCLUDED.source_id,
     vector_item_kind = EXCLUDED.vector_item_kind,
     vector_item_id = EXCLUDED.vector_item_id,
+    index_input_digest = EXCLUDED.index_input_digest,
     updated_at = now()
 """
 
@@ -63,6 +65,7 @@ class PostgresProjectionLedgerRepository:
                 source_id=projection.document_id,
                 vector_item_kind="document",
                 vector_item_id=projection.document_id,
+                index_input_digest=projection.index_input_digest,
                 write=write,
             )
 
@@ -83,6 +86,7 @@ class PostgresProjectionLedgerRepository:
                     source_id=projection.document_id,
                     vector_item_kind="chunk",
                     vector_item_id=projection.chunk_id,
+                    index_input_digest=projection.index_input_digest,
                     write=write,
                 )
 
@@ -103,6 +107,7 @@ class PostgresProjectionLedgerRepository:
                     source_id=projection.document_id,
                     vector_item_kind="signal",
                     vector_item_id=projection.signal_id,
+                    index_input_digest=projection.index_input_digest,
                     write=write,
                 )
 
@@ -123,6 +128,7 @@ class PostgresProjectionLedgerRepository:
                     source_id=projection.folder_id,
                     vector_item_kind="signal",
                     vector_item_id=projection.signal_id,
+                    index_input_digest=projection.index_input_digest,
                     write=write,
                 )
 
@@ -140,6 +146,7 @@ class PostgresProjectionLedgerRepository:
                 source_id=projection.folder_id,
                 vector_item_kind="folder",
                 vector_item_id=projection.folder_id,
+                index_input_digest=projection.index_input_digest,
                 write=write,
             )
 
@@ -199,6 +206,7 @@ class PostgresProjectionLedgerRepository:
         source_id: str,
         vector_item_kind: str,
         vector_item_id: str,
+        index_input_digest: str,
         write: VectorWriteResult,
     ) -> None:
         conn.execute(
@@ -211,5 +219,6 @@ class PostgresProjectionLedgerRepository:
                 source_id,
                 vector_item_kind,
                 vector_item_id,
+                index_input_digest,
             ),
         )

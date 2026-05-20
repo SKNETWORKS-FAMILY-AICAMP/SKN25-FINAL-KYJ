@@ -99,14 +99,14 @@ def document_signal_id(
     *,
     tenant: str,
     document_id: str,
-    source_version: str,
+    index_input_digest: str,
     signal_type: DocumentSignalType | str,
     signal_key: str,
 ) -> str:
     parts = (
         _required_text(tenant, "tenant"),
         _required_text(document_id, "document_id"),
-        _required_text(source_version, "source_version"),
+        _required_text(index_input_digest, "index_input_digest"),
         DEFAULT_SIGNAL_DEFINITIONS.require(signal_type).value,
         _required_text(signal_key, "signal_key"),
     )
@@ -120,6 +120,7 @@ def create_document_signal(
     document_type: str | None,
     document_id: str,
     source_version: str,
+    index_input_digest: str,
     signal_type: DocumentSignalType | str,
     text: str,
     attributes: JsonObject | None,
@@ -127,6 +128,7 @@ def create_document_signal(
     confidence: Confidence | float | None,
     extractor_name: str,
     extractor_version: str,
+    generation_model: str | None = None,
     metadata: Metadata | None = None,
 ) -> DocumentSignal:
     resolved_type = DEFAULT_SIGNAL_DEFINITIONS.require(signal_type)
@@ -147,7 +149,7 @@ def create_document_signal(
         signal_id=document_signal_id(
             tenant=tenant,
             document_id=document_id,
-            source_version=source_version,
+            index_input_digest=index_input_digest,
             signal_type=resolved_type,
             signal_key=signal_key,
         ),
@@ -155,6 +157,7 @@ def create_document_signal(
         document_type=document_type,
         document_id=document_id,
         source_version=source_version,
+        index_input_digest=_required_text(index_input_digest, "index_input_digest"),
         signal_type=resolved_type,
         signal_key=signal_key,
         text=clean_text,
@@ -163,6 +166,7 @@ def create_document_signal(
         confidence=normalize_confidence_value(confidence),
         extractor_name=extractor_name,
         extractor_version=extractor_version,
+        generation_model=_optional_text(generation_model, "generation_model"),
         metadata=dict(metadata or {}),
     )
 
@@ -171,7 +175,7 @@ def folder_signal_id(
     *,
     tenant: str,
     folder_id: str,
-    source_version: str,
+    index_input_digest: str,
     signal_type: FolderSignalType | str,
     signal_key: str,
     related_document_id: str | None = None,
@@ -179,7 +183,7 @@ def folder_signal_id(
     parts = (
         _required_text(tenant, "tenant"),
         _required_text(folder_id, "folder_id"),
-        _required_text(source_version, "source_version"),
+        _required_text(index_input_digest, "index_input_digest"),
         folder_signal_type(signal_type).value,
         _required_text(signal_key, "signal_key"),
         related_document_id.strip() if related_document_id else "",
@@ -202,8 +206,9 @@ def create_folder_signal(
     confidence: Confidence | float | None = None,
     extractor_name: str,
     extractor_version: str,
+    generation_model: str | None = None,
     metadata: Metadata | None = None,
-    folder_signal_input_revision: int = 0,
+    index_input_digest: str,
 ) -> FolderSignal:
     resolved_type = folder_signal_type(signal_type)
     clean_key = _required_text(signal_key, "signal_key")
@@ -219,7 +224,7 @@ def create_folder_signal(
         signal_id=folder_signal_id(
             tenant=tenant,
             folder_id=folder_id,
-            source_version=source_version,
+            index_input_digest=index_input_digest,
             signal_type=resolved_type,
             signal_key=clean_key,
             related_document_id=clean_related_document_id,
@@ -236,8 +241,9 @@ def create_folder_signal(
         confidence=normalize_confidence_value(confidence),
         extractor_name=extractor_name.strip(),
         extractor_version=extractor_version.strip(),
+        generation_model=_optional_text(generation_model, "generation_model"),
         metadata=dict(metadata or {}),
-        folder_signal_input_revision=folder_signal_input_revision,
+        index_input_digest=_required_text(index_input_digest, "index_input_digest"),
     )
 
 
@@ -281,3 +287,20 @@ def _required_text(value: object, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise InvalidInputError(f"{name} must not be blank.")
     return value.strip()
+
+
+def _optional_text(value: object, name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidInputError(f"{name} must be a string.")
+    stripped = value.strip()
+    if not stripped:
+        raise InvalidInputError(f"{name} must not be blank.")
+    return stripped
+
+
+def _non_negative_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise InvalidInputError(f"{name} must be a non-negative integer.")
+    return value

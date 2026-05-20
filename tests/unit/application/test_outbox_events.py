@@ -55,6 +55,7 @@ def _summary_signal(
         document_type=source.document_type,
         document_id=source.document_id,
         source_version=source.source_version,
+        index_input_digest=chunk.index_input_digest,
         signal_type=DocumentSignalType.SUMMARY,
         text="Summary",
         attributes={},
@@ -83,6 +84,7 @@ class OutboxEventCodecTests(unittest.TestCase):
             document_type=source.document_type,
             document_id=source.document_id,
             source_version=source.source_version,
+            index_input_digest="index-input-v1",
             created_at=source.created_at,
             updated_at=source.updated_at,
             chunk_id="chunk-1",
@@ -104,7 +106,7 @@ class OutboxEventCodecTests(unittest.TestCase):
             created_at=source.created_at,
             updated_at=source.updated_at,
             title=source.title,
-            signal_generation_version="1",
+            index_input_digest=chunk.index_input_digest,
         )
         signals = (_summary_signal(source=source, chunk=chunk),)
 
@@ -145,6 +147,18 @@ class OutboxEventCodecTests(unittest.TestCase):
         self.assertNotIn("folder_relation_snapshot", event.payload)
         self.assertEqual(event.payload["chunks"][0]["created_at"], chunk.created_at)
         self.assertEqual(event.payload["chunks"][0]["updated_at"], chunk.updated_at)
+        self.assertEqual(
+            event.payload["chunks"][0]["index_input_digest"],
+            chunk.index_input_digest,
+        )
+        self.assertEqual(
+            event.payload["profile"]["index_input_digest"],
+            chunk.index_input_digest,
+        )
+        self.assertEqual(
+            event.payload["signals"][0]["index_input_digest"],
+            chunk.index_input_digest,
+        )
         self.assertEqual(event.payload["profile"]["created_at"], profile.created_at)
         self.assertEqual(event.payload["profile"]["updated_at"], profile.updated_at)
 
@@ -164,6 +178,7 @@ class OutboxEventCodecTests(unittest.TestCase):
             document_type=source.document_type,
             document_id="doc-other",
             source_version=source.source_version,
+            index_input_digest="index-input-v1",
             created_at=source.created_at,
             updated_at=source.updated_at,
             chunk_id="chunk-1",
@@ -185,7 +200,7 @@ class OutboxEventCodecTests(unittest.TestCase):
             created_at=source.created_at,
             updated_at=source.updated_at,
             title=source.title,
-            signal_generation_version="1",
+            index_input_digest=chunk.index_input_digest,
         )
 
         with self.assertRaises(InvalidInputError):
@@ -258,20 +273,23 @@ class OutboxEventCodecTests(unittest.TestCase):
             text="Research folder responsibility.",
             extractor_name="test",
             extractor_version="v1",
-            folder_signal_input_revision=2,
+            generation_model="folder-model",
+            index_input_digest="folder-signal-input-v2",
         )
 
         source_event = folder_indexed_event(folder=folder)
         indexed_event = folder_signals_indexed_event(
             folder=folder,
-            folder_signal_input_revision=2,
+            index_input_digest="folder-signal-input-v2",
+            signal_generation_version="folder-signals-v1",
             signals=(signal,),
         )
         invalidated_event = folder_signals_invalidated_event(
             FolderSignalInvalidation(
                 tenant="tenant-1",
                 folder_id="folder-1",
-                folder_signal_input_revision=2,
+                index_input_digest="folder-signal-input-v2",
+                signal_generation_version="folder-signals-v1",
             )
         )
 
@@ -290,20 +308,25 @@ class OutboxEventCodecTests(unittest.TestCase):
         self.assertNotIn("signals", source_event.payload)
         self.assertEqual(indexed_event.event_type, "FOLDER_SIGNALS_INDEXED")
         self.assertEqual(
-            indexed_event.payload["signals"][0]["folder_signal_input_revision"],
-            2,
+            indexed_event.payload["signals"][0]["index_input_digest"],
+            "folder-signal-input-v2",
+        )
+        self.assertEqual(
+            indexed_event.payload["signals"][0]["generation_model"],
+            "folder-model",
         )
         self.assertEqual(
             invalidated_event.payload,
             {
                 "tenant": "tenant-1",
                 "folder_id": "folder-1",
-                "folder_signal_input_revision": 2,
+                "index_input_digest": "folder-signal-input-v2",
+                "signal_generation_version": "folder-signals-v1",
             },
         )
-        self.assertEqual(indexed_projection.folder_signal_input_revision, 2)
-        self.assertEqual(indexed_projection.signals[0].folder_signal_input_revision, 2)
-        self.assertEqual(invalidated_projection.folder_signal_input_revision, 2)
+        self.assertEqual(indexed_projection.index_input_digest, "folder-signal-input-v2")
+        self.assertEqual(indexed_projection.signals[0].index_input_digest, "folder-signal-input-v2")
+        self.assertEqual(invalidated_projection.index_input_digest, "folder-signal-input-v2")
 
     def test_outbox_payload_schema_version_stays_at_initial_version(self) -> None:
         with self.assertRaises(InvalidInputError):

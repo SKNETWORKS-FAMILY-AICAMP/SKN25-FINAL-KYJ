@@ -77,7 +77,7 @@ class ProjectFolderSignalVectorsUseCase:
     source_freshness: SourceFreshnessChecker | None = None
 
     def execute(self, command: ProjectFolderSignalsCommand) -> None:
-        if not _is_current_folder_signal_input_revision(self.source_freshness, command):
+        if not _is_current_folder_index_input_digest(self.source_freshness, command):
             return
         projections = tuple(
             folder_signal_vector_projection_from_signal(
@@ -111,11 +111,14 @@ class ProjectFolderSignalVectorsUseCase:
 @dataclass(slots=True)
 class InvalidateFolderSignalVectorsUseCase:
     signal_vectors: SignalVectorStore
+    source_freshness: SourceFreshnessChecker | None = None
 
     def execute(self, command: InvalidateFolderSignalsCommand) -> None:
-        self.signal_vectors.delete_folder_signals_before_input_revision(
+        if not _is_current_folder_signal_invalidation(self.source_freshness, command):
+            return
+        self.signal_vectors.delete_stale_folder_signals(
             folder_id=command.folder_id,
-            folder_signal_input_revision=command.folder_signal_input_revision,
+            current_index_input_digest=command.index_input_digest,
         )
 
 
@@ -146,15 +149,28 @@ def _is_current_folder_source(
     )
 
 
-def _is_current_folder_signal_input_revision(
+def _is_current_folder_index_input_digest(
     source_freshness: SourceFreshnessChecker | None,
     command: ProjectFolderSignalsCommand,
 ) -> bool:
     if source_freshness is None:
         return True
     folder = command.folder
-    return source_freshness.is_current_folder_signal_input_revision(
+    return source_freshness.is_current_folder_index_input_digest(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
-        folder_signal_input_revision=command.folder_signal_input_revision,
+        index_input_digest=command.index_input_digest,
+    )
+
+
+def _is_current_folder_signal_invalidation(
+    source_freshness: SourceFreshnessChecker | None,
+    command: InvalidateFolderSignalsCommand,
+) -> bool:
+    if source_freshness is None:
+        return True
+    return source_freshness.is_current_folder_index_input_digest(
+        tenant=command.tenant,
+        folder_id=command.folder_id,
+        index_input_digest=command.index_input_digest,
     )

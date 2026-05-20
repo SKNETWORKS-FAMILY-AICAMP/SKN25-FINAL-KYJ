@@ -6,9 +6,9 @@ from typing import Any
 
 from foldmind_ai_core.adapters.outbound.neo4j.projection import (
     delete_document_projection,
-    delete_folder_signal_projection_before_revision,
     delete_folder_signal_projection,
     delete_folder_projection,
+    delete_stale_folder_signal_projection,
 )
 from foldmind_ai_core.adapters.outbound.neo4j.projection import (
     replace_document_projection as run_replace_document_projection,
@@ -153,19 +153,19 @@ class Neo4jGraphStore:
                 ),
             )
 
-    def delete_folder_signals_before_input_revision(
+    def delete_stale_folder_signals(
         self,
         *,
         folder_id: str,
-        folder_signal_input_revision: int,
+        current_index_input_digest: str,
     ) -> None:
         with self.client.session() as session:
             _execute_write(
                 session,
-                lambda tx: delete_folder_signal_projection_before_revision(
+                lambda tx: delete_stale_folder_signal_projection(
                     tx,
                     folder_id=folder_id,
-                    folder_signal_input_revision=folder_signal_input_revision,
+                    current_index_input_digest=current_index_input_digest,
                 ),
             )
 

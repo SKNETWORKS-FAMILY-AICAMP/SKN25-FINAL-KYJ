@@ -15,6 +15,7 @@ class DocumentChunkVectorProjection:
     document_id: str
     source_version: str
     content_digest: str
+    index_input_digest: str
     created_at: str
     updated_at: str
     chunk_id: str
@@ -37,6 +38,7 @@ class DocumentVectorProjection:
     document_id: str
     source_version: str
     content_digest: str
+    index_input_digest: str
     created_at: str
     updated_at: str
     embedding_input: str
@@ -56,6 +58,7 @@ class DocumentSignalVectorProjection:
     signal_key: str
     source_version: str
     content_digest: str
+    index_input_digest: str
     attributes: Metadata
     confidence: float | None
     evidence: tuple[ProjectionSignalEvidence, ...]
@@ -75,6 +78,7 @@ class FolderSignalVectorProjection:
     signal_type: str
     signal_key: str
     source_version: str
+    index_input_digest: str
     related_document_id: str | None
     attributes: Metadata
     confidence: float | None
@@ -85,7 +89,6 @@ class FolderSignalVectorProjection:
     embedding_version: str
     index_schema_version: str
     metadata: Metadata = field(default_factory=dict)
-    folder_signal_input_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +96,7 @@ class FolderVectorProjection:
     tenant: str
     folder_id: str
     source_version: str
+    index_input_digest: str
     created_at: str
     updated_at: str
     embedding_input: str

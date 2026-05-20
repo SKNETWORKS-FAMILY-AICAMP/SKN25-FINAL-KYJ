@@ -193,6 +193,8 @@ class PostgresAdapterTests(unittest.TestCase):
         )
 
         self.assertIn("title", _all_sql(connection))
+        self.assertIn("index_input_digest", _all_sql(connection))
+        self.assertIn("generation_model", _all_sql(connection))
         self.assertIn("signal_generation_version", _all_sql(connection))
         self.assertIn("document_sources", _all_sql(connection))
         self.assertIn("ON CONFLICT (document_id)", _all_sql(connection))
@@ -347,6 +349,14 @@ class PostgresAdapterTests(unittest.TestCase):
             row_sets=[
                 [("tenant-1", "doc-1")],
                 [("folder-1",), ("folder-2",)],
+                [("tenant-1",)],
+                [("folder-v1", "Folder 1", None, None, "", {})],
+                [],
+                [("tenant-1", "folder-1", "folder-signal-input-v1", "1")],
+                [("tenant-1",)],
+                [("folder-v1", "Folder 2", None, None, "", {})],
+                [],
+                [("tenant-1", "folder-2", "folder-signal-input-v1", "1")],
             ],
         )
 
@@ -368,13 +378,22 @@ class PostgresAdapterTests(unittest.TestCase):
         self.assertIn("DELETE FROM source_document_folder_relations", sql)
         self.assertNotIn("source_document_folder_relation_state", sql)
         self.assertNotIn("related_document_id = NULL", sql)
+        params = [params for _, params in connection.calls]
         self.assertEqual(
-            [params for _, params in connection.calls],
+            params[:3],
             [
                 ("doc-1",),
                 ("doc-1", "doc-1"),
                 (["folder-1", "folder-2"],),
-                (["folder-1", "folder-2"],),
+            ],
+        )
+        self.assertEqual(params[3][0], "folder-1")
+        self.assertEqual(params[6][1], "folder-1")
+        self.assertEqual(params[7][0], "folder-2")
+        self.assertEqual(params[10][1], "folder-2")
+        self.assertEqual(
+            params[-5:],
+            [
                 ("doc-1",),
                 ("doc-1",),
                 ("doc-1",),
@@ -498,6 +517,7 @@ class PostgresAdapterTests(unittest.TestCase):
                 document_id="doc-1",
                 source_version="v1",
                 content_digest="content-digest-1",
+                index_input_digest="index-input-v1",
                 created_at="2026-05-01T10:00:00+09:00",
                 updated_at="2026-05-02T11:00:00+09:00",
                 embedding_input="Architecture memo",
@@ -543,7 +563,10 @@ class PostgresAdapterTests(unittest.TestCase):
                 "document",
             ),
         )
-        self.assertEqual(connection.calls[-1][1][4:], ("doc-1", "document", "doc-1"))
+        self.assertEqual(
+            connection.calls[-1][1][4:],
+            ("doc-1", "document", "doc-1", "index-input-v1"),
+        )
 
     def test_projection_ledger_deletes_document_projections_by_document_id(
         self,
@@ -1022,8 +1045,7 @@ def _sample_document_profile() -> DocumentProfile:
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         title="Architecture memo",
-        signal_generation_version="signal-set-v1",
-        model="model-a",
+        index_input_digest="index-input-v1",
         metadata={"source": "test"},
     )
 
@@ -1072,6 +1094,7 @@ def _sample_document_chunk() -> DocumentChunk:
         document_type="document",
         document_id="doc-1",
         source_version="v1",
+        index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id="11111111-1111-4111-8111-111111111111",
@@ -1093,6 +1116,7 @@ def _sample_document_signal() -> DocumentSignal:
         document_type="document",
         document_id="doc-1",
         source_version="v1",
+        index_input_digest="index-input-v1",
         signal_type=DocumentSignalType.SUMMARY,
         text="A useful document.",
         attributes={},
@@ -1100,6 +1124,7 @@ def _sample_document_signal() -> DocumentSignal:
         confidence=0.9,
         extractor_name="test",
         extractor_version="v1",
+        generation_model="model-a",
     )
 
 

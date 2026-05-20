@@ -234,7 +234,7 @@ class VectorAdapterTests(unittest.TestCase):
             config=QdrantCollectionConfig(
                 collection_name="documents",
                 vector_size=3,
-                payload_indexes=("tenant", "updated_at", "folder_signal_input_revision"),
+                payload_indexes=("tenant", "updated_at", "index_input_digest"),
             ),
             settings=QdrantSettings(url="http://qdrant:6333"),
             client=client,
@@ -248,7 +248,7 @@ class VectorAdapterTests(unittest.TestCase):
             [
                 ("documents", "tenant", "keyword"),
                 ("documents", "updated_at", "datetime"),
-                ("documents", "folder_signal_input_revision", "integer"),
+                ("documents", "index_input_digest", "keyword"),
             ],
         )
 
@@ -310,27 +310,44 @@ class VectorAdapterTests(unittest.TestCase):
                     "chunk-1",
                 ),
                 stable_internal_id(
-                    "qdrant-point",
                     "documents",
+                    "document",
                     "doc-1",
+                    "index-input-v1",
                 ),
-                stable_internal_id("signal-vector", "document", "doc-1", "signal-1"),
                 stable_internal_id(
+                    "signals",
+                    "signal-vector",
+                    "document",
+                    "doc-1",
+                    "signal-1",
+                    "index-input-v1",
+                ),
+                stable_internal_id(
+                    "signals",
                     "signal-vector",
                     "folder",
                     "folder-1",
                     "folder-signal-1",
+                    "folder-signal-input-v1",
                 ),
-                stable_internal_id("qdrant-point", "folders", "folder-1"),
+                stable_internal_id(
+                    "folders",
+                    "folder",
+                    "folder-1",
+                    "folder-input-v1",
+                ),
             ],
         )
         self.assertEqual(payloads[1]["kind"], "document")
         self.assertEqual(payloads[1]["content_digest"], "content-digest-1")
+        self.assertEqual(payloads[1]["index_input_digest"], "index-input-v1")
         self.assertNotIn("concept_ids", payloads[1])
         self.assertEqual(payloads[2]["kind"], "signal")
         self.assertEqual(payloads[2]["owner_kind"], "document")
         self.assertEqual(payloads[2]["document_type"], "document")
         self.assertEqual(payloads[2]["content_digest"], "content-digest-1")
+        self.assertEqual(payloads[2]["index_input_digest"], "index-input-v1")
         self.assertEqual(payloads[2]["evidence"][0]["chunk_id"], "chunk-1")
         self.assertEqual(payloads[3]["kind"], "signal")
         self.assertEqual(payloads[3]["owner_kind"], "folder")
@@ -540,10 +557,10 @@ class GraphAdapterTests(unittest.TestCase):
                 document_id="doc-1",
                 source_version="v1",
                 content_digest="content-digest-1",
+                index_input_digest="index-input-v1",
                 created_at="2026-05-01T10:00:00+09:00",
                 updated_at="2026-05-02T11:00:00+09:00",
                 title="Title",
-                signal_generation_version="signal-set-v1",
                 signals=(
                     DocumentSignalNodeProjection(
                         signal_id="signal-1",
@@ -554,7 +571,9 @@ class GraphAdapterTests(unittest.TestCase):
                         document_id="doc-1",
                         source_version="v1",
                         content_digest="content-digest-1",
+                        index_input_digest="index-input-v1",
                         confidence=0.9,
+                        generation_model="test-model",
                     ),
                 ),
             ),
@@ -671,7 +690,7 @@ class GraphAdapterTests(unittest.TestCase):
                 tenant="tenant-1",
                 folder_id="folder-1",
                 source_version="folder-v1",
-                folder_signal_input_revision=2,
+                index_input_digest="folder-signal-input-v2",
                 signals=(
                     FolderSignalNodeProjection(
                         signal_id="folder-signal-1",
@@ -683,7 +702,7 @@ class GraphAdapterTests(unittest.TestCase):
                         text="Outlier document",
                         related_document_id="doc-2",
                         confidence=0.7,
-                        folder_signal_input_revision=2,
+                        index_input_digest="folder-signal-input-v2",
                     ),
                 ),
             ),
@@ -711,7 +730,7 @@ class GraphAdapterTests(unittest.TestCase):
 
         signal_statements = "\n".join(client.sessions[1].transactions[0].statements)
         self.assertIn("MERGE (s:FolderSignal {signal_id: $signal_id})", signal_statements)
-        self.assertIn("s.folder_signal_input_revision = $folder_signal_input_revision", signal_statements)
+        self.assertIn("s.index_input_digest = $index_input_digest", signal_statements)
         self.assertIn("ABOUT_DOCUMENT", signal_statements)
 
 
@@ -738,6 +757,7 @@ def _chunk_projection() -> DocumentChunkVectorProjection:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
+        index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id="chunk-1",
@@ -760,6 +780,7 @@ def _document_projection() -> DocumentVectorProjection:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
+        index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         embedding_input="startup summary",
@@ -780,6 +801,7 @@ def _signal_projection() -> DocumentSignalVectorProjection:
         signal_key="document-summary",
         source_version="v1",
         content_digest="content-digest-1",
+        index_input_digest="index-input-v1",
         confidence=0.8,
         attributes={},
         evidence=(ProjectionSignalEvidence(chunk_id="chunk-1", quote="startup evidence"),),
@@ -799,6 +821,7 @@ def _folder_signal_projection() -> FolderSignalVectorProjection:
         signal_type="responsibility",
         signal_key="responsibility",
         source_version="folder-v1",
+        index_input_digest="folder-signal-input-v1",
         attributes={"responsibility_score": 0.8},
         related_document_id="doc-2",
         confidence=0.9,
@@ -826,6 +849,7 @@ def _signal_payload(*, owner_kind: str) -> dict[str, object]:
             "text": "Folder responsibility",
             "source_version": "folder-v1",
             "content_digest": None,
+            "index_input_digest": "folder-signal-input-v1",
             "attributes": {"responsibility_score": 0.8},
             "related_document_id": "doc-2",
             "evidence": [{"reason": "document outlier"}],
@@ -849,6 +873,7 @@ def _signal_payload(*, owner_kind: str) -> dict[str, object]:
         "text": "Document summary",
         "source_version": "v1",
         "content_digest": "content-digest-1",
+        "index_input_digest": "index-input-v1",
         "attributes": {},
         "related_document_id": None,
         "evidence": [{"chunk_id": "chunk-1", "quote": "startup evidence"}],
@@ -866,6 +891,7 @@ def _folder_projection() -> FolderVectorProjection:
         tenant="tenant-1",
         folder_id="folder-1",
         source_version="folder-v1",
+        index_input_digest="folder-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         embedding_input="Founding\n\n/Company/Founding\n\nstartup folder",

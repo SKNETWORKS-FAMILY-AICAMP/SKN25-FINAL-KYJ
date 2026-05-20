@@ -127,7 +127,8 @@ def folder_signals_invalidated_event(
         payload={
             "tenant": invalidation.tenant,
             "folder_id": invalidation.folder_id,
-            "folder_signal_input_revision": invalidation.folder_signal_input_revision,
+            "index_input_digest": invalidation.index_input_digest,
+            "signal_generation_version": invalidation.signal_generation_version,
         },
     )
 
@@ -135,7 +136,8 @@ def folder_signals_invalidated_event(
 def folder_signals_indexed_event(
     *,
     folder: SourceFolder,
-    folder_signal_input_revision: int,
+    index_input_digest: str,
+    signal_generation_version: str,
     signals: tuple[FolderSignal, ...],
 ) -> OutboxEvent:
     return OutboxEvent(
@@ -145,7 +147,8 @@ def folder_signals_indexed_event(
         event_type=str(OutboxEventType.FOLDER_SIGNALS_INDEXED),
         payload={
             "source_folder": source_folder_payload(folder),
-            "folder_signal_input_revision": folder_signal_input_revision,
+            "index_input_digest": index_input_digest,
+            "signal_generation_version": signal_generation_version,
             "signals": [folder_signal_payload(signal) for signal in signals],
         },
     )
@@ -230,6 +233,7 @@ def document_chunk_payload(
         "document_id": chunk.document_id,
         "source_version": chunk.source_version,
         "content_digest": content_digest,
+        "index_input_digest": chunk.index_input_digest,
         "created_at": chunk.created_at,
         "updated_at": chunk.updated_at,
         "chunk_id": chunk.chunk_id,
@@ -257,11 +261,11 @@ def document_profile_payload(
         "document_id": profile.document_id,
         "source_version": profile.source_version,
         "content_digest": content_digest,
+        "index_input_digest": profile.index_input_digest,
+        "signal_generation_version": profile.signal_generation_version,
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
         "title": profile.title,
-        "signal_generation_version": profile.signal_generation_version,
-        "model": profile.model,
         "metadata": profile.metadata,
     }
 
@@ -278,6 +282,7 @@ def document_signal_payload(
         "document_id": signal.document_id,
         "source_version": signal.source_version,
         "content_digest": content_digest,
+        "index_input_digest": signal.index_input_digest,
         "signal_type": str(signal.signal_type),
         "signal_key": signal.signal_key,
         "text": signal.text,
@@ -289,6 +294,7 @@ def document_signal_payload(
         "confidence": signal.confidence,
         "extractor_name": signal.extractor_name,
         "extractor_version": signal.extractor_version,
+        "generation_model": signal.generation_model,
         "metadata": signal.metadata,
     }
 
@@ -301,7 +307,7 @@ def folder_signal_payload(
         "tenant": signal.tenant,
         "folder_id": signal.folder_id,
         "source_version": signal.source_version,
-        "folder_signal_input_revision": signal.folder_signal_input_revision,
+        "index_input_digest": signal.index_input_digest,
         "signal_type": str(signal.signal_type),
         "signal_key": signal.signal_key,
         "text": signal.text,
@@ -311,6 +317,7 @@ def folder_signal_payload(
         "confidence": signal.confidence,
         "extractor_name": signal.extractor_name,
         "extractor_version": signal.extractor_version,
+        "generation_model": signal.generation_model,
         "metadata": signal.metadata,
     }
 

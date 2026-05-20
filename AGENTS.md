@@ -56,6 +56,16 @@ App Server가 소유한다.
 
 문서의 `source_version`은 문서 본문만의 버전이 아니라 문서 aggregate version이다. App Server는 문서 title/content/metadata 변경뿐 아니라 폴더 추가, 제거, 이동, 전체 비움 같은 폴더 membership 변경 때도 해당 문서의 `source_version`을 반드시 증가시켜야 한다. Folder relation snapshot의 `source_version`은 별도 relation version이 아니라 같은 문서 aggregate `source_version`이어야 한다.
 
+AI-Core에서 `source_version`은 stale 요청을 막는 aggregate freshness guard다. Chunk, signal, vector point 같은 AI-Core 파생물의 identity는 `source_version`이 아니라 `content_digest`와 AI-Core indexing 정책을 해시한 `index_input_digest`를 기준으로 만든다. 따라서 폴더 membership만 바뀌어 document aggregate `source_version`이 증가해도 본문 입력과 indexing 정책이 같으면 content chunk/vector/signal identity는 유지되어야 한다.
+
+Folder-derived signal도 숫자 revision이 아니라 `index_input_digest`로 freshness를 판단한다. `folder_index_records.index_input_digest`와 `folder_signals.index_input_digest`는 folder source, folder metadata, 현재 member document들의 source/content/index projection identity를 해시한 folder signal 입력 identity다. 늦게 도착한 folder signal invalidation event는 이 digest가 현재 folder index record와 일치할 때만 stale signal projection을 삭제해야 한다.
+
+`signal_generation_version`은 현재 저장된 signal set이 어떤 signal 생성 정책 버전으로 만들어졌는지 나타내는 독립 컬럼이다. Signal type 추가/제거, prompt 정책 변경, extractor schema 변경처럼 signal set 자체가 달라지는 변경은 이 버전으로 드러나야 한다.
+
+문서별 folder relation은 별도 state table 없이 membership row로만 저장한다. 해당 문서의 relation row가 0개이면 어떤 폴더에도 속하지 않는 최신 empty membership으로 해석한다. AI-Core는 relation update의 `source_version`이 현재 `document_sources.source_version`과 정확히 같을 때만 membership row를 교체한다.
+
+LLM 모델명은 index record의 freshness key가 아니다. 실제 생성물 provenance가 필요한 경우 `document_signals.generation_model` 또는 `folder_signals.generation_model`처럼 signal row에 둔다. Deterministic extractor 결과는 `generation_model`이 없을 수 있다.
+
 AI-Core는 canonical user data를 소유하지 않는다.
 
 AI-Core가 소유할 수 있는 것은 AI/index 파생 데이터다.

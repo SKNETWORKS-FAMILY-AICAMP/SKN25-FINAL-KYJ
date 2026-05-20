@@ -40,14 +40,16 @@ class ProjectFolderCommand:
 @dataclass(frozen=True, slots=True)
 class ProjectFolderSignalsCommand:
     folder: ProjectionFolder
-    folder_signal_input_revision: int
+    index_input_digest: str
+    signal_generation_version: str = "1"
     signals: tuple[ProjectionFolderSignal, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class InvalidateFolderSignalsCommand:
+    tenant: str
     folder_id: str
-    folder_signal_input_revision: int
+    index_input_digest: str
 
 
 @dataclass(frozen=True, slots=True)

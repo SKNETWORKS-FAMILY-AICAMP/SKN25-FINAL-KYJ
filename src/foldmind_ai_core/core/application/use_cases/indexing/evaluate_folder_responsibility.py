@@ -20,6 +20,7 @@ from foldmind_ai_core.core.application.services.outbox_events import (
     folder_signals_indexed_event,
 )
 from foldmind_ai_core.core.domain.models.profiling import FolderSignal
+from foldmind_ai_core.core.domain.services.profiling import folder_signal_id
 
 
 @dataclass(slots=True)
@@ -39,11 +40,11 @@ class EvaluateFolderResponsibilityUseCase:
         if folder is None:
             raise ResourceNotFoundError(f"Folder source not found: {command.folder_id}")
         with self.indexing_uow.transaction() as tx:
-            target_input_revision = tx.current_folder_signal_input_revision(
+            target_index_input_digest = tx.current_folder_index_input_digest(
                 tenant=command.tenant,
                 folder_id=command.folder_id,
             )
-        if target_input_revision is None:
+        if target_index_input_digest is None:
             raise ResourceNotFoundError(
                 f"Folder index record not found: {command.folder_id}"
             )
@@ -52,23 +53,23 @@ class EvaluateFolderResponsibilityUseCase:
             folder_id=command.folder_id,
         )
         extraction = self.signal_extractor.evaluate(folder, member_documents)
-        signals = _with_extraction_metadata(
+        signals = _with_index_input_digest(
             extraction.signals,
-            signal_generation_version=extraction.signal_generation_version,
-            model=extraction.model,
-            folder_signal_input_revision=target_input_revision,
+            index_input_digest=target_index_input_digest,
         )
         with self.indexing_uow.transaction() as tx:
             commit = tx.replace_folder_signals(
                 folder=folder,
                 signals=signals,
-                expected_input_revision=target_input_revision,
+                expected_index_input_digest=target_index_input_digest,
+                signal_generation_version=extraction.signal_generation_version,
             )
             if commit.applied:
                 tx.append_outbox_event(
                     folder_signals_indexed_event(
                         folder=folder,
-                        folder_signal_input_revision=commit.folder_signal_input_revision,
+                        index_input_digest=commit.index_input_digest,
+                        signal_generation_version=extraction.signal_generation_version,
                         signals=signals,
                     )
                 )
@@ -81,22 +82,23 @@ class EvaluateFolderResponsibilityUseCase:
         )
 
 
-def _with_extraction_metadata(
+def _with_index_input_digest(
     signals: tuple[FolderSignal, ...],
     *,
-    signal_generation_version: str,
-    model: str,
-    folder_signal_input_revision: int,
+    index_input_digest: str,
 ) -> tuple[FolderSignal, ...]:
     return tuple(
         replace(
             signal,
-            metadata={
-                **signal.metadata,
-                "signal_generation_version": signal_generation_version,
-                "model": model,
-            },
-            folder_signal_input_revision=folder_signal_input_revision,
+            signal_id=folder_signal_id(
+                tenant=signal.tenant,
+                folder_id=signal.folder_id,
+                index_input_digest=index_input_digest,
+                signal_type=signal.signal_type,
+                signal_key=signal.signal_key,
+                related_document_id=signal.related_document_id,
+            ),
+            index_input_digest=index_input_digest,
         )
         for signal in signals
     )

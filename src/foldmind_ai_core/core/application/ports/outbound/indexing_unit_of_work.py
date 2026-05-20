@@ -56,12 +56,12 @@ class IndexingTransaction(Protocol):
     ) -> FolderIndexChange:
         ...
 
-    def current_folder_signal_input_revision(
+    def current_folder_index_input_digest(
         self,
         *,
         tenant: str,
         folder_id: str,
-    ) -> int | None:
+    ) -> str | None:
         ...
 
     def replace_folder_signals(
@@ -69,7 +69,8 @@ class IndexingTransaction(Protocol):
         *,
         folder: SourceFolder,
         signals: tuple[FolderSignal, ...],
-        expected_input_revision: int,
+        expected_index_input_digest: str,
+        signal_generation_version: str,
     ) -> FolderSignalRefreshCommit:
         ...
 

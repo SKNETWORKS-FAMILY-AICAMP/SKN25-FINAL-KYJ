@@ -36,14 +36,32 @@
 - 문서 title/content/metadata 또는 폴더 membership이 바뀌면 App Server는 반드시 해당 문서의 `source_version`을 바꿔야 한다.
 - 폴더 추가, 제거, 이동, 전체 비움은 모두 문서 aggregate version 증가 대상이다.
 - Folder relation snapshot의 `source_version`은 별도 relation version이 아니라 같은 문서 aggregate `source_version`이어야 한다.
+- `source_version`은 stale 요청과 오래된 비동기 작업 결과를 막는 aggregate freshness guard다.
+- Chunk, signal, vector point 같은 AI-Core 파생물의 identity에는 `source_version`을 사용하지 않는다.
 - `source_version`은 같은 문서나 폴더 안에서 문자열 사전식 정렬로 비교 가능해야 하며, 의미 있는 입력이 바뀔 때마다 단조 증가해야 한다.
 - AI-Core와 App Server 사이의 계약은 문자열 사전식 정렬에서 더 큰 `source_version`이 더 최신 source임을 보장한다.
 - AI-Core는 오래된 비동기 작업 결과가 최신 결과를 덮어쓰지 못하도록 `source_version`을 기준으로 최신성을 확인한다.
 - 문서는 본문 변경 여부도 함께 확인해 stale result를 막는다.
 - AI-Core는 folder relation snapshot을 적용할 때 현재 document source의 `source_version`과 snapshot `source_version`이 일치하는 경우에만 반영한다.
+- AI-Core에서 relation row가 0개이면 해당 document는 어떤 folder에도 속하지 않는 최신 empty membership으로 해석한다.
 - Relation snapshot이 document source indexing보다 먼저 도착하면 적용하지 않는다. App Server는 document source indexing 이후 relation snapshot을 보내거나 재전송해야 한다.
 
-## 5. 분석 결과
+## 5. Index Input Digest
+
+- `content_digest`는 문서 본문 identity다.
+- `index_input_digest`는 AI-Core content projection 생성 입력 identity다.
+- `index_input_digest`는 `content_digest`, chunking policy, embedding/vector policy, projection schema version처럼 AI-Core가 chunk/signal/vector를 만드는 데 사용한 입력으로 계산한다.
+- `index_input_digest`에는 `source_version`을 넣지 않는다.
+- 폴더 membership만 바뀌어 document aggregate `source_version`이 증가해도 본문과 indexing 정책이 같으면 `index_input_digest`는 유지되어야 한다.
+- Chunk id, document signal id, vector point id는 `source_version`이 아니라 `index_input_digest`를 기준으로 안정적으로 생성한다.
+- Folder-derived signal의 `index_input_digest`는 folder source, folder metadata, 현재 member document들의 source/content/index projection identity를 해시한 입력 identity다.
+- `folder_index_records.index_input_digest`와 `folder_signals.index_input_digest`는 같은 folder signal 입력 identity를 사용한다. 별도 숫자형 folder signal input revision은 두지 않는다.
+- Folder signal invalidation worker는 event의 `index_input_digest`가 현재 folder index record와 일치할 때만 stale signal projection을 삭제한다. 삭제 대상은 같은 folder의 signal projection 중 현재 digest와 다른 projection이다.
+- `signal_generation_version`은 현재 저장된 signal set이 어떤 signal 생성 정책 버전으로 만들어졌는지 나타내는 독립 컬럼이다.
+- `chunking_version`, embedding version, schema version은 독립 freshness 컬럼이 아니라 `index_input_digest` 계산 입력으로 관리한다. Extractor version과 LLM model name은 signal row의 extractor/provenance 정보로 관리한다.
+- `generation_model`은 LLM 기반 signal row의 provenance다. Freshness 판단에는 사용하지 않으며 deterministic extractor 결과에서는 비어 있을 수 있다.
+
+## 6. 분석 결과
 
 - 문서 분석 결과는 항상 특정 문서에 속한다.
 - 폴더 분석 결과는 항상 특정 폴더에 속한다.
@@ -52,7 +70,7 @@
 - 문서 삭제 시 그 문서를 포함하던 폴더의 폴더 signal은 함께 무효화한다.
 - AI-Core는 삭제된 문서를 근거로 만든 폴더 signal을 보존하지 않으며, 필요한 경우 App Server가 폴더 책임 평가를 다시 요청해 최신 signal을 만든다.
 
-## 6. Signal
+## 7. Signal
 
 - Signal은 AI-Core가 문서나 폴더에서 추출한 의미 단위다.
 - 문서 signal과 폴더 signal은 서로 다른 책임을 가지므로 분리한다.
@@ -61,21 +79,21 @@
 - 전체 workspace에 직접 속하는 signal은 만들지 않는다.
 - Signal의 소유자는 항상 문서 또는 폴더 중 하나다.
 
-## 7. 폴더 책임 평가
+## 8. 폴더 책임 평가
 
 - 폴더 책임 평가는 폴더가 자기 이름, 경로, 설명에 맞는 문서들을 담고 있는지 평가하는 것이다.
 - 폴더 책임 평가는 폴더 추천, 폴더 정리 제안, 이상 문서 탐지에 사용된다.
 - 책임 적합도, 설명과의 정렬, 문서 간 응집도, 이상 문서 여부는 폴더 signal로 표현한다.
 - 폴더 책임 평가는 독립적인 최신 평가 결과로 관리하며, 과거 평가 이력은 보존하지 않는다.
 
-## 8. 상태 관리
+## 9. 상태 관리
 
 - source/index 계층은 작업 처리 상태를 소유하지 않는다.
 - `pending`, `processing`, `failed`, `retry`, `locked` 같은 상태는 outbox, job queue, DLQ가 책임진다.
 - source/index 계층은 삭제와 보존 정책만 표현한다.
 - 삭제된 데이터는 일정 기간 보존한 뒤 정리할 수 있다.
 
-## 9. Projection
+## 10. Projection
 
 - PostgreSQL은 최신 source, 최신 분석 결과, outbox event를 저장한다.
 - Qdrant와 Neo4j 반영은 outbox worker가 비동기로 수행한다.
@@ -83,7 +101,7 @@
 - 같은 이벤트가 여러 번 처리되어도 최종 결과는 한 번 처리한 것과 같아야 한다.
 - 오래된 projection event는 최신 source와 비교해 무시한다.
 
-## 10. Qdrant
+## 11. Qdrant
 
 - Qdrant는 의미 검색을 위한 vector projection 저장소다.
 - Qdrant는 source of truth가 아니다.
@@ -92,7 +110,7 @@
 - signal vector는 같은 signal collection 안에서 소유자가 문서인지 폴더인지 구분한다.
 - 폴더 추천, 폴더 책임 평가, 이상 문서 탐지는 folder signal을 검색과 랭킹에 활용할 수 있어야 한다.
 
-## 11. Neo4j
+## 12. Neo4j
 
 - Neo4j는 graph 탐색과 관계 기반 추천을 위한 projection 저장소다.
 - Neo4j는 source of truth가 아니다.
@@ -100,7 +118,7 @@
 - 문서 signal과 폴더 signal은 graph에서도 분리된 개념으로 다룬다.
 - 폴더 signal이 특정 문서를 지목할 때만 해당 문서와 관계를 만든다.
 
-## 12. 스키마 운영 원칙
+## 13. 스키마 운영 원칙
 
 - 현재 schema version은 계속 `1`이다.
 - 현재 v1 스키마 자체를 최신 기준으로 유지한다.
