@@ -15,11 +15,11 @@ from foldmind_ai_core.adapters.outbound.workflow_runtime.checkpoint_codec import
 )
 from foldmind_ai_core.adapters.outbound.workflow_runtime.graph_state import GraphState
 from foldmind_ai_core.adapters.outbound.workflow_runtime.nodes import LangGraphWorkflowNodes
-from foldmind_ai_core.application.workflows.engine import WorkflowEngine
-from foldmind_ai_core.application.workflows.state.plan import WorkflowActionType
-from foldmind_ai_core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.domain.workflow.actions import HostActionResult
-from foldmind_ai_core.domain.workflow.tasks import TaskSnapshot
+from foldmind_ai_core.core.application.workflows.engine import WorkflowEngine
+from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
+from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
+from foldmind_ai_core.core.domain.models.workflow.actions import HostActionResult
+from foldmind_ai_core.core.domain.models.workflow.tasks import TaskSnapshot
 
 GraphBuilder: TypeAlias = StateGraph[GraphState, None, GraphState, GraphState]
 

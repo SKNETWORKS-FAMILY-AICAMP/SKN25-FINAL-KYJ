@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from enum import StrEnum
-from typing import Any, TypeVar, get_args, get_origin, get_type_hints
+from types import UnionType
+from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 PostDecodeHook = Callable[[type[object], dict[str, object]], dict[str, object]]
 T = TypeVar("T")
@@ -71,7 +72,7 @@ class JsonModelCodec:
             self._type_key: model_type.__name__,
             self._value_key: {
                 field.name: self.encode(getattr(value, field.name))
-                for field in fields(value)
+                for field in fields(cast(Any, value))
             },
         }
 
@@ -103,8 +104,20 @@ class JsonModelCodec:
     def _coerce_field(value: object, annotation: object | None) -> object:
         if annotation is None:
             return value
-        if get_origin(annotation) is tuple and isinstance(value, list):
-            return tuple(value)
+        origin = get_origin(annotation)
+        if origin in (Union, UnionType):
+            for option in get_args(annotation):
+                if option is type(None):
+                    continue
+                coerced = JsonModelCodec._coerce_field(value, option)
+                if coerced is not value:
+                    return coerced
+            return value
+        if origin is tuple and isinstance(value, list):
+            return tuple(
+                JsonModelCodec._coerce_field(item, _tuple_item_annotation(annotation))
+                for item in value
+            )
         enum_type = _enum_type(annotation)
         if enum_type is not None and isinstance(value, str):
             return enum_type(value)
@@ -124,4 +137,13 @@ def _enum_type(annotation: object) -> type[StrEnum] | None:
     for arg in get_args(annotation):
         if isinstance(arg, type) and issubclass(arg, StrEnum):
             return arg
+    return None
+
+
+def _tuple_item_annotation(annotation: object) -> object | None:
+    args = get_args(annotation)
+    if not args:
+        return None
+    if len(args) == 2 and args[1] is Ellipsis:
+        return cast(object, args[0])
     return None

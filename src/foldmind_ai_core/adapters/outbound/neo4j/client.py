@@ -3,10 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from neo4j import GraphDatabase
-
-from foldmind_ai_core.adapters.outbound.neo4j.schema import ensure_schema as run_ensure_schema
+from foldmind_ai_core.adapters.outbound.neo4j.schema import ensure_neo4j_schema
 from foldmind_ai_core.adapters.outbound.neo4j.settings import Neo4jSettings
+from neo4j import GraphDatabase
 
 
 @dataclass(slots=True)
@@ -28,4 +27,4 @@ class Neo4jClient:
 
     def ensure_database_schema(self) -> None:
         with self.session() as session:
-            run_ensure_schema(session)
+            ensure_neo4j_schema(session)

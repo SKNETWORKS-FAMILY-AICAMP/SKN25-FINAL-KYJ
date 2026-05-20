@@ -21,12 +21,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ai = [
-    "langchain>=1.0",
-]
 dev = [
     "mypy>=1.13",
-    "pytest>=8",
     "ruff>=0.8",
 ]
 

@@ -7,15 +7,13 @@ _CONSTRAINTS = (
     "FOR (n:Document) REQUIRE n.document_id IS UNIQUE",
     "CREATE CONSTRAINT folder_identity IF NOT EXISTS "
     "FOR (n:Folder) REQUIRE n.folder_id IS UNIQUE",
-    "CREATE CONSTRAINT tag_identity IF NOT EXISTS "
-    "FOR (n:Tag) REQUIRE n.tag_id IS UNIQUE",
-    "CREATE CONSTRAINT concept_identity IF NOT EXISTS "
-    "FOR (n:Concept) REQUIRE n.concept_id IS UNIQUE",
-    "CREATE CONSTRAINT concept_tenant_key IF NOT EXISTS "
-    "FOR (n:Concept) REQUIRE (n.tenant, n.concept_key) IS UNIQUE",
+    "CREATE CONSTRAINT document_signal_identity IF NOT EXISTS "
+    "FOR (n:DocumentSignal) REQUIRE n.signal_id IS UNIQUE",
+    "CREATE CONSTRAINT folder_signal_identity IF NOT EXISTS "
+    "FOR (n:FolderSignal) REQUIRE n.signal_id IS UNIQUE",
 )
 
 
-def ensure_schema(session: Any) -> None:
+def ensure_neo4j_schema(session: Any) -> None:
     for statement in _CONSTRAINTS:
         session.run(statement)

@@ -3,7 +3,7 @@
 [한국어 README](README.ko.md)
 
 FoldMind-AI-Core is the AI processing server that runs beside the FoldMind app
-server. The app server remains the owner of source documents, folders, tags,
+server. The app server remains the owner of source documents, folders,
 permissions, users, and business rules. AI-Core receives current-state snapshots
 from the app server and stores only derived AI data: search payloads, document
 AI profiles, lightweight folder metadata indexes, graph relationships, workflow
@@ -27,7 +27,7 @@ canonical source data.
 
 | Owner | Owns |
 | --- | --- |
-| FoldMind app server | Source documents, source folders, tags, permissions, users, and business rules. |
+| FoldMind app server | Source documents, source folders, source tags, permissions, users, and business rules. |
 | AI-Core | Document AI profiles, vector index payloads, graph DB relationships, retrieval results, generated outputs, workflow state, and proposed host actions. |
 
 AI-Core does not call the app server directly. When a task needs to create a folder,
@@ -41,16 +41,19 @@ and reports the result back to AI-Core.
 
 The app server sends a `SourceDocument` snapshot. AI-Core splits the body into
 searchable `DocumentChunk` records and creates an embedding for each chunk. The LLM
-then creates a document AI profile (`DocumentProfile`) containing the source title,
-summary, derived concepts, profile confidence, model name, and prompt version.
+then creates a profiling manifest (`DocumentProfile`) and extracted
+`KnowledgeSignal` records for summary, concept, entity, issue, commitment, and
+claim evidence.
 
 Indexing writes the profile and an outbox event atomically to PostgreSQL.
 Debezium Kafka consumers asynchronously project Qdrant and graph DB state. Outbox
-events carry a database-generated sequence and an `AGGREGATE:ID` event key so
-workers can skip stale messages. Qdrant stores chunk vectors and document-level vectors. The graph DB stores
-document-to-folder, document-to-tag, document-to-concept, tag-to-concept, and folder
-hierarchy relationships. Chunk text stays in Qdrant; chunk nodes are not projected
-into the graph DB.
+events carry a database-generated sequence, idempotency key, and `AGGREGATE:ID`
+event key for stream ordering, idempotency, and dead-letter context. Qdrant
+stores chunk, signal, folder, and document-level vectors. The graph DB stores
+document-to-folder, document-to-signal, folder-to-signal, and folder hierarchy
+relationships. Neo4j projection state is not mirrored in
+PostgreSQL; recovery uses outbox replay plus Kafka dead-letter handling. Chunk
+text stays in Qdrant; chunk nodes are not projected into the graph DB.
 
 **Folder Indexing**
 
@@ -68,10 +71,10 @@ server remains canonical for folder display data and permissions.
 Document search uses two stores together.
 
 1. Qdrant finds chunks and documents that are semantically close to the question.
-2. The graph DB finds documents linked through folders, tags, and derived concepts.
+2. The graph DB finds documents linked through folders and knowledge signals.
 3. AI-Core combines the document IDs found by both stores and searches chunks inside those documents.
 4. Retrieved chunks are ranked by score.
-5. The relevance validation agent removes chunks that do not answer the question.
+5. The relevance filter agent removes chunks that do not answer the question.
 
 `/retrieval/search` returns the resulting chunk list.
 
@@ -103,11 +106,11 @@ report the result.
 
 | Step | What Happens |
 | --- | --- |
-| App server sends | `POST /indexing/documents` with title, body, version, folder IDs, tags, and metadata. |
+| App server sends | `POST /indexing/documents` with title, body, version, folder IDs, and metadata. |
 | AI-Core validates | Tenant, source identity, version, and indexable text are checked. |
 | AI-Core creates chunks | The body is split into `DocumentChunk` records. |
 | AI-Core creates embeddings | Each chunk body is converted into a vector. |
-| AI-Core creates a profile | The LLM generates title-backed summary, derived concepts, and profile confidence. |
+| AI-Core creates signals | The LLM generates a profiling manifest plus summary, concept, entity, issue, commitment, and claim signals. |
 | AI-Core stores derived data | PostgreSQL, Qdrant, and the graph DB receive derived records. |
 | App server receives | The indexed chunk count. The source document remains owned by the app server. |
 
@@ -118,7 +121,7 @@ report the result.
 | App server sends | `POST /retrieval/answer` with question, tenant, and search scope. |
 | AI-Core finds document IDs | Qdrant document vectors and graph DB relationship search find related document IDs. |
 | AI-Core finds chunks | Chunks are searched inside those documents. If no document IDs are found, chunk search runs directly within the requested scope. |
-| AI-Core validates chunks | The relevance validation agent removes chunks unrelated to the question. |
+| AI-Core filters chunks | The relevance filter agent removes chunks unrelated to the question. |
 | AI-Core generates an answer | The answer generation agent writes an answer from the remaining chunks. |
 | App server receives | Answer text and citations for evidence chunks. |
 
@@ -151,9 +154,9 @@ tasks or recommendation targets return `404` on routes that handle those cases.
 | Method | Path | Request DTO | Response DTO | Purpose |
 | --- | --- | --- | --- | --- |
 | `POST` | `/indexing/documents` | `IndexDocumentRequest` | `IndexDocumentResponse` | Index a document snapshot and return the created chunk count. |
-| `POST` | `/indexing/documents/delete` | `DeleteDocumentIndexRequest` | `DeleteDocumentIndexResponse` | Delete the document profile, vector payloads, and graph DB relationships. |
+| `DELETE` | `/indexing/documents/{document_id}` | - | `204 No Content` | Delete the document profile, vector payloads, and graph DB relationships. |
 | `POST` | `/indexing/folders` | `IndexFolderRequest` | `IndexFolderResponse` | Index a folder snapshot and return the searchable folder model. |
-| `POST` | `/indexing/folders/delete` | `DeleteFolderIndexRequest` | `DeleteFolderIndexResponse` | Delete the folder vector payloads and graph DB relationships. |
+| `DELETE` | `/indexing/folders/{folder_id}` | - | `204 No Content` | Delete the folder vector payloads and graph DB relationships. |
 
 ### Retrieval And Recommendations
 
@@ -168,8 +171,8 @@ tasks or recommendation targets return `404` on routes that handle those cases.
 | Method | Path | Request DTO | Response DTO | Purpose |
 | --- | --- | --- | --- | --- |
 | `POST` | `/tasks` | `CreateTaskRequest` | `TaskSnapshotResponse` | Start a task or append a request to an existing task. |
-| `GET` | `/tasks/{tenant}/{task_id}` | - | `TaskSnapshotResponse` | Read the latest task snapshot visible to the app server. |
-| `DELETE` | `/tasks/{tenant}/{task_id}/requests/{task_request_id}` | - | `TaskSnapshotResponse` | Mark a request entry as removed and replan from the active requests. |
+| `GET` | `/tasks/{task_id}` | - | `TaskSnapshotResponse` | Read the latest task snapshot visible to the app server. |
+| `DELETE` | `/tasks/requests/{task_request_id}` | - | `TaskSnapshotResponse` | Mark a request entry as removed and replan from the active requests. |
 | `POST` | `/tasks/actions/result` | `RecordHostActionResultRequest` | `RecordHostActionResultResponse` | Resume a paused workflow after the app server reports a host action result. |
 
 ## Search Behavior
@@ -178,16 +181,13 @@ Document search is implemented by `FindDocumentsUseCase`.
 
 1. Convert the question text into an embedding.
 2. Search the Qdrant `documents` collection for related document IDs.
-3. Search the graph DB for document IDs connected to the question through tags, folders, and derived concepts.
+3. Search the graph DB for document IDs connected to the question through folders and knowledge signals.
 4. If document IDs were found, run chunk vector search inside those documents.
 5. If no document IDs were found, run chunk vector search directly within the request `SearchScope`.
-6. If an optional keyword repository is configured and the mode is `hybrid`, combine dense and keyword results with reciprocal rank fusion.
-7. `ChunkRelevanceValidatorAgent` removes chunks that are not related to the question.
+6. `ChunkRelevanceFilterAgent` removes chunks that are not related to the question.
 
 The current Qdrant adapter implements dense chunk vectors, document-level vectors,
-and folder vectors. Keyword search is split into the optional
-`DocumentKeywordRepository`; the current Qdrant adapter does not implement keyword
-indexing.
+and folder vectors.
 
 ## Workflow Lifecycle
 
@@ -199,30 +199,27 @@ control of source-data changes.
 3. `RunTaskUseCase` stores the current `TaskSnapshot` and calls the workflow runtime.
 3. `PlanningAgent` turns the request into a `WorkflowPlan`.
 4. `WorkflowPlanCompiler` turns the plan into executable steps.
-5. `WorkflowStepExecutor` dispatches each step to a search, recommendation, generation, or host-action planning handler.
-6. Step results are stored in `WorkflowArtifactStore` and exposed as app-server-visible `TaskOutput` values.
+5. `WorkflowStepExecutor` dispatches each step to a search, recommendation, generation, or host-action planning step.
+6. Step results are recorded through `WorkflowArtifactRegistry` and exposed as app-server-visible `TaskOutput` values.
 7. When a host action is created, the workflow saves a checkpoint and pauses.
-8. The app server can remove a request entry through `DELETE /tasks/{tenant}/{task_id}/requests/{task_request_id}`.
+8. The app server can remove a request entry through `DELETE /tasks/requests/{task_request_id}`.
 9. The app server reports the action result through `POST /tasks/actions/result`, and the workflow resumes from the checkpoint.
 10. When no steps or pending actions remain, the final `TaskSnapshot` is stored.
 
 ## Agents
 
 An agent is an application-layer component responsible for one prompt-backed LLM
-task. Agents depend on `LLM` and `PromptRepositoryPort`, not directly on the OpenAI
-SDK.
+task. Agents depend on `LLMProvider` and `PromptStore`, not directly on the
+OpenAI SDK.
 
 | Agent | Prompt key | Used by | Responsibility |
 | --- | --- | --- | --- |
 | `PlanningAgent` | `workflow_planning` | `WorkflowEngine.prepare()` | Turn a natural-language task into a validated `WorkflowPlan`. |
-| `DocumentProfilerAgent` | `document_profiling` | `IndexDocumentUseCase` | Create a `DocumentProfile` from a document and its chunks. |
-| `ChunkRelevanceValidatorAgent` | `chunk_relevance_validation` | `FindDocumentsUseCase` | Keep only retrieved chunks related to the question. |
-| `AnswerGeneratorAgent` | `answer_generation` | `AnswerQuestionUseCase`, workflow `answer_question` step | Generate a cited answer from retrieved chunks. |
-| `SummarizerAgent` | `summarization` | Workflow summary/report steps | Generate a summary from retrieved chunks. |
-| `DraftGeneratorAgent` | `draft_generation` | Workflow `generate_draft` step | Generate a draft from user instructions and retrieved context. |
-| `IdeasExplorerAgent` | `ideas_exploration` | Workflow `explore_ideas` step | Generate ideas from a user prompt and retrieved context. |
+| `DocumentProfilerAgent` | `document_profiling` | `IndexDocumentUseCase` | Create a `DocumentProfile` manifest and `KnowledgeSignal` set from a document and its chunks. |
+| `ChunkRelevanceFilterAgent` | `chunk_relevance_filtering` | `FindDocumentsUseCase` | Keep only retrieved chunks related to the question. |
+| `ContextGenerationAgent` | `answer_generation`, `summarization`, `draft_generation`, `ideas_exploration` | Retrieval and workflow generation steps | Generate cited text from retrieved chunks using a caller-selected prompt. |
 
-RAG-oriented agents render `UNTRUSTED_CONTEXT_INSTRUCTION` into prompts before
+Context generation agents render `UNTRUSTED_CONTEXT_INSTRUCTION` into prompts before
 passing retrieved chunks to the LLM. The planner renders
 `ALLOWED_WORKFLOW_ACTION_TYPES` so the model selects only actions supported by the
 runtime.
@@ -233,12 +230,12 @@ runtime.
 | --- | --- | --- |
 | Source snapshot | `SourceDocument`, `SourceFolder` | Current-state source data sent by the app server. Ownership does not transfer to AI-Core. |
 | Retrieval/index model | `DocumentChunk`, `DocumentVectorProjection`, `FolderVectorProjection`, `RetrievedDocument`, `RetrievedFolder` | Store-specific projections and retrieval-facing references created by AI-Core. |
-| AI profile | `DocumentProfile` | AI-generated document title snapshot, summary, derived concepts, and profile confidence. |
-| Retrieval | `AIQuery`, `RequestContext`, `SearchScope`, `QueryAnchor` | Question text, tenant information, search scope, and anchor. |
+| AI profile | `DocumentProfile`, `KnowledgeSignal` | Profiling manifest plus signalized summary, concept, entity, issue, commitment, and claim outputs. |
+| Retrieval | `RetrievalQuery`, `RequestContext`, `SearchScope`, `QueryAnchor` | Question text, tenant information, search scope, and anchor. |
 | Generation | `GeneratedTextResult`, `DraftResult`, recommendation results, clarification results | Typed outputs produced by generation and recommendation steps. |
 | Workflow | `TaskRequest`, `TaskSnapshot`, `TaskAnalysis`, `TaskOutput`, `TaskEvent` | Task state and outputs visible to the app server. |
 | Host action | `HostAction`, `HostActionResult`, action input/output payload | Proposed source-data change that the app server must execute. |
-| Knowledge graph | `DocumentRelationshipProjection`, `DocumentConceptProjection`, `FolderRelationshipProjection`, `TagProjection` | Derived relationships between documents, folders, tags, and concepts. |
+| Knowledge graph | `DocumentRelationshipProjection`, `DocumentSignalGraphProjection`, `FolderRelationshipProjection` | Derived relationships between documents, folders, and knowledge signals. |
 | Outbox event | `OutboxEvent` | Immutable projection input event emitted with PostgreSQL profile changes. |
 
 Important rules:
@@ -247,43 +244,49 @@ Important rules:
 - Vector projections and AI profiles are rebuildable derived state.
 - Task outputs are typed. For example, a `summary` output must contain generated text.
 - Host action payloads must match `HostActionType`.
-- DTOs validate API input before mapping into plain domain state containers.
+- DTOs validate API input before mappers build use case commands and queries.
 
 ## Data Storage
 
 AI-Core stores derived AI state only. It does not store canonical documents,
-canonical folders, canonical tags, or permissions.
+canonical folders, canonical tags, or permissions. Source tags may appear only as
+opaque source metadata and are not promoted into graph or search scope.
 
 ### PostgreSQL
 
 | Table | Primary Key | Stores |
 | --- | --- | --- |
-| `document_profiles` | `document_id` | Latest document profile title, summary, concepts JSON, profile confidence, source/profile/schema versions, and metadata. |
-| `outbox_events` | `id` UUID | Transactional outbox events consumed through Debezium Kafka to project Qdrant and graph DB state. `sequence` and `event_key` are used for ordering and stale-message protection. |
+| `tenant_storage_scopes` | `tenant_id` | Tenant-level AI-Core storage lifecycle and retention scope. |
+| `document_refs`, `folder_refs` | UUID refs | Source identities: `document_id` is the canonical document key and `(tenant_id, folder_id)` is the folder key. `document_type` is optional descriptive metadata only. |
+| `source_document_snapshots`, `source_folder_snapshots` | UUID snapshots | Minimal snapshot manifests: source identity, digest, size, schema version, metadata, and timestamps. Raw source bodies and storage locations are not stored. |
+| `document_index_records`, `document_chunk_sets`, `document_chunks`, `folder_index_records` | UUID records | Current and historical derived indexing manifests and chunk records. |
+| `knowledge_signals` | `signal_id` | Extracted signal text, payload, evidence, confidence, extractor metadata, and source document/version scope. |
+| `vector_projection_records` | UUID projection IDs | Qdrant write ledger. Records track collection, point ID, aggregate/subject identity, payload digest, projected/deleted timestamps, and retention state without source-row FKs. |
+| `outbox_events` | `id` UUID | Kafka/Debezium transactional outbox events. `tenant_id`, `idempotency_key`, `sequence`, and `event_key` are used for stream ordering, idempotency, and dead-letter context. |
+| `retrieval_runs`, `retrieval_results` | UUID run/result IDs | User-facing retrieval request history with query digest, scope, status, result ids, scores, and reasons. Query plaintext is not stored. |
 | `tasks` | `task_id` UUID | Current task aggregate status, active request text, analysis message, current action, error, and metadata. |
 | `task_requests` | `task_request_id` UUID | Ordered user request entries within a task, including active/removed status. |
 | `task_outputs` | `output_id` UUID | Typed task outputs with result payloads and task-local ordering. |
-| `host_actions` | `action_id` UUID | Proposed host actions with typed input payloads, result payloads, policy JSON, and task-local ordering. |
-| `host_action_dependencies` | `action_id` + `depends_on_action_id` | Host action dependency edges with FK validation. |
+| `host_actions` | `action_id` UUID | Proposed host actions with typed input payloads, result payloads, policy JSON, and task-local sequential ordering. |
 | `task_events` | `event_id` UUID | Task event log. |
 
 PostgreSQL schema is managed by Alembic. Run migrations before starting the API:
 
 ```bash
-POSTGRES_DSN=postgresql://user:password@host:5432/foldmind_ai_core alembic upgrade head
+FOLDMIND_POSTGRES_DSN=postgresql://user:password@host:5432/foldmind_ai_core alembic upgrade head
 ```
 
-The initial migration chain creates normalized profile, outbox, and task tables for
-a fresh database. It does not include conversion steps from an older storage
-format.
+The initial migration chain creates the optimized first-version derived-state
+schema, Kafka outbox, the Qdrant vector ledger, and workflow task tables.
 
 ### Qdrant
 
 | Setting | Default Collection | Payload Kind | Purpose |
 | --- | --- | --- | --- |
-| `QDRANT_DOCUMENT_CHUNK_COLLECTION` | `document_chunks` | `document_chunk` | Vector search over chunk text. |
-| `QDRANT_DOCUMENT_COLLECTION` | `documents` | `document` | Document-level vector search over profile-enriched text. |
-| `QDRANT_FOLDER_COLLECTION` | `folders` | `folder` | Folder metadata vector search for folder discovery and recommendations. |
+| `FOLDMIND_QDRANT_DOCUMENT_CHUNK_COLLECTION` | `document_chunks` | `document_chunk` | Vector search over chunk text. |
+| `FOLDMIND_QDRANT_DOCUMENT_COLLECTION` | `documents` | `document` | Document-level vector search over profile-enriched text. |
+| `FOLDMIND_QDRANT_SIGNAL_COLLECTION` | `signals` | `signal` | Signal-level vector search over extracted knowledge signals. |
+| `FOLDMIND_QDRANT_FOLDER_COLLECTION` | `folders` | `folder` | Folder metadata vector search for folder discovery and recommendations. |
 
 ### Graph DB
 
@@ -293,9 +296,7 @@ indexing always write relationships to the graph DB.
 | Relationship | Meaning |
 | --- | --- |
 | `Document` - `Folder` | Which folders contain a document. |
-| `Document` - `Tag` | Which tags are attached to a document. |
-| `Document` - `Concept` | Which derived concepts appear in a document profile. |
-| `Tag` - `Concept` | Which derived concept a tag represents. |
+| `Document` - `Signal` | Which extracted knowledge signals are attached to a document version. |
 | `Folder` - `Folder` | Folder hierarchy. |
 
 Graph DB relationships are derived data for retrieval quality. The app server
@@ -304,7 +305,7 @@ remains the source of truth for folder structure, permissions, and tags.
 ### Workflow Checkpoints
 
 Production workflow checkpoints are stored in PostgreSQL through
-`FOLDMIND_WORKFLOW_CHECKPOINT_DSN` or `POSTGRES_DSN`. The in-memory checkpointer is
+`FOLDMIND_WORKFLOW_CHECKPOINT_DSN` or `FOLDMIND_POSTGRES_DSN`. The in-memory checkpointer is
 only for local/test configuration.
 
 ## Architecture
@@ -330,7 +331,7 @@ Application use cases
         |
         v
 Outbound ports
-  LLM / embeddings / vector index / graph DB / repositories / runtime
+  LLMProvider / embeddings / vector stores / graph store / repositories / runtime
         |
         v
 Outbound adapters
@@ -339,14 +340,15 @@ Outbound adapters
 
 | Package | Role |
 | --- | --- |
-| `domain/` | Business models and validation. No external framework dependencies. |
-| `application/ports/inbound/` | Use case contracts called by the app server. |
-| `application/ports/outbound/` | Interfaces for LLMs, embeddings, repositories, vector indexes, graph DB, prompts, and workflow runtime. |
-| `application/use_cases/` | Indexing, retrieval, recommendation, and workflow task orchestration. |
-| `application/agents/` | Prompt-backed AI tasks. |
-| `application/workflows/` | Workflow step execution, artifact storage, and host action handling policy. |
+| `core/domain/models/` | Business models. No external framework dependencies. |
+| `core/domain/services/` | Pure domain rules such as concept normalization, confidence validation, and outbox invariants. |
+| `core/application/ports/inbound/` | Use case contracts called by the app server. |
+| `core/application/ports/outbound/` | Interfaces for LLM providers, embedding providers, PostgreSQL repositories, vector stores, graph store, prompt store, and workflow runtime. |
+| `core/application/use_cases/` | Indexing, retrieval, recommendation, and workflow task orchestration. |
+| `core/application/agents/` | Prompt-backed AI tasks. |
+| `core/application/workflows/` | Workflow step execution, artifact storage, and host action result policy. |
 | `adapters/inbound/http/` | FastAPI routers, REST DTOs, and HTTP error mapping. |
-| `adapters/outbound/` | PostgreSQL, Qdrant, graph DB, OpenAI, LangGraph, and file prompt implementations. |
+| `adapters/outbound/` | PostgreSQL, Qdrant, graph DB, OpenAI, LangGraph, and file prompt store implementations. |
 | `bootstrap/` | Read settings and wire concrete adapters into use cases. |
 
 ## Deployment And Configuration
@@ -356,70 +358,64 @@ This repository uses endpoint-based configuration. There is no global
 their own endpoints. Dockerfile and Compose manifests are not present yet.
 
 ```dotenv
-POSTGRES_DSN=postgresql://user:password@host:5432/foldmind_ai_core
+FOLDMIND_POSTGRES_DSN=postgresql://user:password@host:5432/foldmind_ai_core
 
-AI_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-LLM_MODEL=gpt-4.1-mini
-EMBEDDING_MODEL=text-embedding-3-small
-EMBEDDING_VERSION=text-embedding-3-small
-CHUNKING_VERSION=chunking-v1
-INDEX_SCHEMA_VERSION=index-schema-v1
-PROFILE_VERSION=profile-v1
-PROFILE_SCHEMA_VERSION=profile-schema-v1
-DOCUMENT_PROFILE_PROMPT_VERSION=document-profile-prompt-v1
-EMBEDDING_DIMENSIONS=1536
+FOLDMIND_AI_PROVIDER=openai
+FOLDMIND_OPENAI_API_KEY=sk-...
+FOLDMIND_LLM_MODEL=gpt-4.1-mini
+FOLDMIND_EMBEDDING_MODEL=text-embedding-3-small
+FOLDMIND_EMBEDDING_VERSION=text-embedding-3-small
+FOLDMIND_CHUNKING_VERSION=chunking-v1
+FOLDMIND_INDEX_SCHEMA_VERSION=index-schema-v1
+FOLDMIND_DOCUMENT_PROFILE_PROMPT_VERSION=document-profile-prompt-v1
+FOLDMIND_EMBEDDING_DIMENSIONS=1536
 
-QDRANT_URL=http://qdrant:6333
-QDRANT_API_KEY=
+FOLDMIND_QDRANT_URL=http://qdrant:6333
+FOLDMIND_QDRANT_API_KEY=
 
-NEO4J_URI=bolt://neo4j:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=password
+FOLDMIND_NEO4J_URI=bolt://neo4j:7687
+FOLDMIND_NEO4J_USER=neo4j
+FOLDMIND_NEO4J_PASSWORD=password
 ```
 
-`POSTGRES_DSN`, `QDRANT_URL`, `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`,
-`EMBEDDING_VERSION`, `CHUNKING_VERSION`, `INDEX_SCHEMA_VERSION`,
-`PROFILE_VERSION`, `PROFILE_SCHEMA_VERSION`, and
-`DOCUMENT_PROFILE_PROMPT_VERSION` are required for the standard configured API.
+`FOLDMIND_POSTGRES_DSN`, `FOLDMIND_QDRANT_URL`, `FOLDMIND_NEO4J_URI`, `FOLDMIND_NEO4J_USER`, `FOLDMIND_NEO4J_PASSWORD`,
+`FOLDMIND_EMBEDDING_VERSION`, `FOLDMIND_CHUNKING_VERSION`, `FOLDMIND_INDEX_SCHEMA_VERSION`,
+and `FOLDMIND_DOCUMENT_PROFILE_PROMPT_VERSION` are required for the standard
+configured API.
 
 Example environment files:
 
-- `.env.example`: root template listing supported settings.
 - `examples/env/local.env`: local self-hosted endpoint example.
-- `examples/env/hybrid.env`: local PostgreSQL with external Qdrant and graph DB.
+- `examples/env/local-postgres-external-services.env`: local PostgreSQL with external
+  Qdrant, graph DB, and Kafka endpoints.
 - `examples/env/external.env`: external PostgreSQL, Qdrant, and graph DB endpoints.
 
 ## Package Layout
 
 ```text
 foldmind-ai-core/
-  resources/
-    prompts/       Prompt template source copies for local editing/reference
-  scripts/         Local helper entrypoints
+  scripts/         Local run and maintenance entrypoints
   src/foldmind_ai_core/
     main.py        Configured ASGI process entrypoint
     resources/     Runtime package data and bundled prompts
     bootstrap/     Settings, app factory, and container wiring
-    domain/        Business models and validation
-    application/   Use cases, ports, agents, and workflow policy
+    core/
+      domain/        Domain models and pure domain services
+      application/   Use cases, ports, agents, and workflow policy
     adapters/      Inbound and outbound concrete adapters
-    shared/        Shared primitive types and validation utilities
+    shared/        Shared primitive types and validation rules
   tests/
     unit/          Active unit tests
     contract/      Active app-server and schema contract tests
-    integration/   Placeholder package for future external-service tests
-    e2e/           Placeholder package for future end-to-end flows
 ```
 
-The package name is `foldmind_ai_core`. The previous `ai_core` package path has
-been removed.
+The package name is `foldmind_ai_core`.
 
 ## Development
 
 ```bash
 python -m pip install -r requirements.txt
-PYTHONPATH=src python -S -c "import foldmind_ai_core.domain; import foldmind_ai_core.application.ports"
+PYTHONPATH=src python -S -c "import foldmind_ai_core.core.domain; import foldmind_ai_core.core.application.ports"
 PYTHONPATH=src python -m unittest discover -s tests
 PYTHONPATH=src python -m compileall -q src tests
 python -m pip install -e ".[dev]"
@@ -428,25 +424,21 @@ mypy src
 ```
 
 `scripts/run_api.sh` starts the configured ASGI app. `scripts/run_worker.sh`
-starts the Kafka outbox projection worker. `scripts/reindex_documents.py` is a
-placeholder until the standalone reindex entrypoint is wired.
+starts the Kafka outbox projection worker.
 
-Run one outbox worker per `OUTBOX_PROJECTION_TARGET`: `qdrant-document-chunks`,
-`qdrant-documents`, `qdrant-folders`, or `neo4j-graph`. The worker always derives
+Run one outbox worker per `FOLDMIND_OUTBOX_PROJECTION_TARGET`: `qdrant-document-chunks`,
+`qdrant-documents`, `qdrant-signals`, `qdrant-folders`, or `neo4j-graph`. The worker always derives
 a target-specific consumer group name so each projection target consumes the same
 outbox stream independently.
 The default outbox topic is `indexing-events`; configure Debezium so the Kafka
 message key is the `event_key` column. Failed messages are published to
-`indexing-events.dlq`; replay them with `scripts/replay_dlq.py` after fixing the
+`indexing-events.dlq`; replay them with `scripts/replay_dead_letter_events.py` after fixing the
 underlying failure.
 
 For local workflow bootstrap without a separate checkpoint DSN, set
 `FOLDMIND_ALLOW_IN_MEMORY_WORKFLOW_CHECKPOINT=true`. The standard configured API
-still requires `POSTGRES_DSN`, `QDRANT_URL`, and graph DB settings.
+still requires `FOLDMIND_POSTGRES_DSN`, `FOLDMIND_QDRANT_URL`, and graph DB settings.
 
 ## Current Limitations
 
 - Dockerfile and Compose manifests are not present yet.
-- The current Qdrant adapter does not implement keyword indexing.
-- `tests/integration/` and `tests/e2e/` are placeholder packages.
-- `scripts/reindex_documents.py` is a placeholder.

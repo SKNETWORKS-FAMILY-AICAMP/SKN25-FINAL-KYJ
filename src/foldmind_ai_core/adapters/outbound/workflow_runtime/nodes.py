@@ -14,10 +14,17 @@ from foldmind_ai_core.adapters.outbound.workflow_runtime.checkpoint_codec import
     workflow_state_to_checkpoint,
 )
 from foldmind_ai_core.adapters.outbound.workflow_runtime.graph_state import GraphState
-from foldmind_ai_core.application.workflows.engine import WorkflowEngine
-from foldmind_ai_core.application.workflows.state.plan import WorkflowActionType
-from foldmind_ai_core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.domain.workflow.actions import HostActionResult
+from foldmind_ai_core.core.application.workflows.engine import WorkflowEngine
+from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
+from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
+from foldmind_ai_core.core.domain.models.workflow.actions import HostActionResult
+from foldmind_ai_core.core.domain.models.workflow.tasks import TaskStatus
+
+_TERMINAL_TASK_STATUSES = {
+    TaskStatus.COMPLETED,
+    TaskStatus.FAILED,
+    TaskStatus.REJECTED,
+}
 
 
 @dataclass(slots=True)
@@ -78,6 +85,8 @@ class LangGraphWorkflowNodes:
 
     def route_after_step(self, state: GraphState) -> str:
         workflow = workflow_state_from_checkpoint(state)
+        if workflow.task.status in _TERMINAL_TASK_STATUSES:
+            return END
         if workflow.last_error is not None:
             return (
                 routes.RETRY_STEP
@@ -90,6 +99,8 @@ class LangGraphWorkflowNodes:
 
     def route_after_resume(self, state: GraphState) -> str:
         workflow = workflow_state_from_checkpoint(state)
+        if workflow.task.status in _TERMINAL_TASK_STATUSES:
+            return END
         if workflow.last_error is not None:
             return routes.FAIL
         if workflow.needs_replan:

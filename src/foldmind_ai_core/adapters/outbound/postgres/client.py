@@ -9,7 +9,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from foldmind_ai_core.adapters.outbound.postgres.settings import PostgresSettings
-from foldmind_ai_core.shared.types import Metadata
+from foldmind_ai_core.shared.types import JsonValue
 
 
 @dataclass(slots=True)
@@ -36,7 +36,7 @@ class PostgresClient:
             yield conn
 
 
-def jsonb(value: Metadata) -> Any:
+def jsonb(value: JsonValue) -> Any:
     return Jsonb(value)
 
 

@@ -2,130 +2,147 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI
-
-from foldmind_ai_core.adapters.outbound.workflow_runtime.graph import LangGraphWorkflowGraph
-from foldmind_ai_core.application.agents.answer_generator_agent import AnswerGeneratorAgent
-from foldmind_ai_core.application.agents.chunk_relevance_validator_agent import (
-    ChunkRelevanceValidatorAgent,
+from foldmind_ai_core.bootstrap.api_use_cases import APIUseCases
+from foldmind_ai_core.bootstrap.container.dependencies import (
+    ApplicationDependencies,
 )
-from foldmind_ai_core.application.agents.document_profiler_agent import DocumentProfilerAgent
-from foldmind_ai_core.application.services.document_chunker import (
+from foldmind_ai_core.bootstrap.container.workflow import build_workflow_runtime
+from foldmind_ai_core.bootstrap.settings import APISettings
+from foldmind_ai_core.core.application.agents.chunk_relevance_filter_agent import (
+    ChunkRelevanceFilterAgent,
+)
+from foldmind_ai_core.core.application.agents.context_generation_agent import (
+    ContextGenerationAgent,
+)
+from foldmind_ai_core.core.application.agents.document_profiler_agent import DocumentProfilerAgent
+from foldmind_ai_core.core.application.services.document_retrieval_policy import (
+    DocumentRetrievalConfig,
+)
+from foldmind_ai_core.core.application.services.document_retrieval_service import (
+    DocumentRetrievalService,
+)
+from foldmind_ai_core.core.application.services.folder_recommendation_source_resolver import (
+    FolderRecommendationSourceResolver,
+)
+from foldmind_ai_core.core.application.services.folder_retrieval_service import (
+    FolderRetrievalService,
+)
+from foldmind_ai_core.core.application.services.relationship_scope_resolver import (
+    RelationshipScopeResolver,
+)
+from foldmind_ai_core.core.application.services.signal_retrieval_service import (
+    SignalRetrievalService,
+)
+from foldmind_ai_core.core.application.use_cases.indexing.delete_document_index import (
+    DeleteDocumentIndexUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.indexing.delete_folder_index import (
+    DeleteFolderIndexUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.indexing.index_document import (
+    IndexDocumentUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.indexing.index_folder import (
+    IndexFolderUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.indexing.update_document_folder_relations import (
+    UpdateDocumentFolderRelationsUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.recommendation.find_folders import (
+    FindFoldersUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.recommendation.recommend_folder import (
+    RecommendFolderUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.retrieval.find_documents import (
+    FindDocumentsUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.retrieval.find_signals import (
+    FindSignalsUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.workflow.get_task import GetTaskUseCase
+from foldmind_ai_core.core.application.use_cases.workflow.record_action_result import (
+    RecordActionResultUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.workflow.remove_task_input import (
+    RemoveTaskInputUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.workflow.run_task import RunTaskUseCase
+from foldmind_ai_core.core.domain.services.document_chunking import (
     DocumentChunker,
     DocumentChunkingConfig,
 )
-from foldmind_ai_core.application.services.document_retrieval_policy import (
-    HybridSearchConfig,
-)
-from foldmind_ai_core.application.services.document_retrieval_service import (
-    DocumentRetrievalService,
-)
-from foldmind_ai_core.application.services.folder_retrieval_service import (
-    FolderRetrievalService,
-)
-from foldmind_ai_core.application.services.relationship_scope_resolver import (
-    RelationshipScopeResolver,
-)
-from foldmind_ai_core.application.ports.outbound.prompt_repository import PromptRepositoryPort
-from foldmind_ai_core.application.use_cases.indexing import (
-    DeleteDocumentIndexUseCase,
-    DeleteFolderIndexUseCase,
-    IndexDocumentUseCase,
-    IndexFolderUseCase,
-)
-from foldmind_ai_core.application.use_cases.recommendation.find_folders import FindFoldersUseCase
-from foldmind_ai_core.application.use_cases.recommendation.recommend_folder import (
-    RecommendFolderUseCase,
-)
-from foldmind_ai_core.application.use_cases.retrieval.answer_question import AnswerQuestionUseCase
-from foldmind_ai_core.application.use_cases.retrieval.find_documents import (
-    FindDocumentsUseCase,
-)
-from foldmind_ai_core.application.use_cases.workflow.get_task import GetTaskUseCase
-from foldmind_ai_core.application.use_cases.workflow.record_action_result import (
-    RecordActionResultUseCase,
-)
-from foldmind_ai_core.application.use_cases.workflow.remove_task_request import (
-    RemoveTaskRequestUseCase,
-)
-from foldmind_ai_core.application.use_cases.workflow.run_task import RunTaskUseCase
-from foldmind_ai_core.bootstrap.app_factory import APIUseCases, create_app
-from foldmind_ai_core.bootstrap.container.checkpointing import build_workflow_checkpointer
-from foldmind_ai_core.bootstrap.container.dependencies import (
-    AICoreDependencies,
-    AIProviderAdapters,
-    RepositoryAdapter,
-)
-from foldmind_ai_core.bootstrap.container.providers import (
-    build_ai_provider,
-    build_prompt_repository,
-)
-from foldmind_ai_core.bootstrap.container.repositories import build_repository_adapter
-from foldmind_ai_core.bootstrap.container.workflow import _build_workflow_engine
-from foldmind_ai_core.bootstrap.settings import APISettings
 
 
 def build_use_cases(
-    dependencies: AICoreDependencies,
+    dependencies: ApplicationDependencies,
     *,
     settings: APISettings | None = None,
-    hybrid_search_config: HybridSearchConfig | None = None,
+    document_retrieval_config: DocumentRetrievalConfig | None = None,
     workflow_checkpointer: Any | None = None,
 ) -> APIUseCases:
     settings = settings or APISettings()
     ai = dependencies.ai
-    repositories = dependencies.repositories
-    relationship_scope_resolver = RelationshipScopeResolver(graph=repositories.graph)
+    storage = dependencies.storage
+    relationship_scope_resolver = RelationshipScopeResolver(graph=storage.graph)
     document_retrieval = DocumentRetrievalService(
         embeddings=ai.embeddings,
-        chunk_vectors=repositories.chunk_vectors,
-        document_vectors=repositories.document_vectors,
-        graph=repositories.graph,
-        keyword_repository=repositories.keyword_repository,
-        config=hybrid_search_config or HybridSearchConfig(),
+        chunk_vectors=storage.chunk_vectors,
+        document_vectors=storage.document_vectors,
+        graph=storage.graph,
+        config=document_retrieval_config or DocumentRetrievalConfig(),
     )
     find_documents = FindDocumentsUseCase(
         retrieval=document_retrieval,
         scope_resolver=relationship_scope_resolver,
-        result_filter=ChunkRelevanceValidatorAgent(
+        result_filter=ChunkRelevanceFilterAgent(
             llm=ai.llm,
-            prompt_repository=dependencies.prompt_repository,
+            prompt_store=dependencies.prompt_store,
         ),
     )
-    answer_generator = AnswerGeneratorAgent(
+    find_signals = FindSignalsUseCase(
+        retrieval=SignalRetrievalService(
+            embeddings=ai.embeddings,
+            signal_vectors=storage.signal_vectors,
+        )
+    )
+    context_generator = ContextGenerationAgent(
         llm=ai.llm,
-        prompt_repository=dependencies.prompt_repository,
+        prompt_store=dependencies.prompt_store,
     )
     find_folders = FindFoldersUseCase(
         retrieval=FolderRetrievalService(
             embeddings=ai.embeddings,
-            chunk_vectors=repositories.chunk_vectors,
-            document_vectors=repositories.document_vectors,
-            folder_vectors=repositories.folder_vectors,
-            graph=repositories.graph,
+            chunk_vectors=storage.chunk_vectors,
+            document_vectors=storage.document_vectors,
+            folder_vectors=storage.folder_vectors,
+            graph=storage.graph,
         ),
         scope_resolver=relationship_scope_resolver,
     )
     recommend_folder = RecommendFolderUseCase(find_folders=find_folders)
-    workflow = LangGraphWorkflowGraph(
-        engine=_build_workflow_engine(
-            llm=ai.llm,
-            prompt_repository=dependencies.prompt_repository,
-            find_documents=find_documents,
-            find_folders=find_folders,
-            recommend_folder=recommend_folder,
-            answer_generator=answer_generator,
-        ),
-        checkpointer=workflow_checkpointer or build_workflow_checkpointer(settings),
+    folder_recommendation_sources = FolderRecommendationSourceResolver(
+        indexed_documents=storage.indexed_document_sources,
+        graph=storage.graph,
+    )
+    workflow = build_workflow_runtime(
+        settings=settings,
+        llm=ai.llm,
+        prompt_store=dependencies.prompt_store,
+        find_documents=find_documents,
+        find_signals=find_signals,
+        find_folders=find_folders,
+        recommend_folder=recommend_folder,
+        folder_recommendation_sources=folder_recommendation_sources,
+        context_generator=context_generator,
+        checkpointer=workflow_checkpointer,
     )
     return APIUseCases(
         index_document=IndexDocumentUseCase(
-            indexing_uow=repositories.indexing_uow,
-            profiler=DocumentProfilerAgent(
+            indexing_uow=storage.indexing_uow,
+            signal_extractor=DocumentProfilerAgent(
                 llm=ai.llm,
-                prompt_repository=dependencies.prompt_repository,
-                profile_version=settings.required_profile_version,
-                profile_schema_version=settings.required_profile_schema_version,
+                prompt_store=dependencies.prompt_store,
                 prompt_version=settings.required_document_profile_prompt_version,
                 model=settings.llm_model,
             ),
@@ -139,75 +156,28 @@ def build_use_cases(
             ),
         ),
         delete_document_index=DeleteDocumentIndexUseCase(
-            indexing_uow=repositories.indexing_uow,
+            indexing_uow=storage.indexing_uow,
+        ),
+        update_document_folder_relations=UpdateDocumentFolderRelationsUseCase(
+            indexing_uow=storage.indexing_uow,
         ),
         index_folder=IndexFolderUseCase(
-            indexing_uow=repositories.indexing_uow,
+            indexing_uow=storage.indexing_uow,
         ),
         delete_folder_index=DeleteFolderIndexUseCase(
-            indexing_uow=repositories.indexing_uow,
+            indexing_uow=storage.indexing_uow,
         ),
         run_task=RunTaskUseCase(
-            task_repository=repositories.task_repository,
+            task_repository=storage.task_repository,
             workflow=workflow,
         ),
-        get_task=GetTaskUseCase(task_repository=repositories.task_repository),
-        remove_task_request=RemoveTaskRequestUseCase(
-            task_repository=repositories.task_repository,
+        get_task=GetTaskUseCase(task_repository=storage.task_repository),
+        remove_task_input=RemoveTaskInputUseCase(
+            task_repository=storage.task_repository,
             workflow=workflow,
         ),
         record_action_result=RecordActionResultUseCase(
-            task_repository=repositories.task_repository,
+            task_repository=storage.task_repository,
             workflow=workflow,
         ),
-        search_documents=find_documents,
-        answer_question=AnswerQuestionUseCase(
-            find_documents=find_documents,
-            answer_generator=answer_generator,
-        ),
-        recommend_folder=recommend_folder,
-    )
-
-
-def build_app(
-    dependencies: AICoreDependencies,
-    *,
-    settings: APISettings | None = None,
-    hybrid_search_config: HybridSearchConfig | None = None,
-    workflow_checkpointer: Any | None = None,
-) -> FastAPI:
-    settings = settings or APISettings()
-    return create_app(
-        build_use_cases(
-            dependencies,
-            settings=settings,
-            hybrid_search_config=hybrid_search_config,
-            workflow_checkpointer=workflow_checkpointer,
-        ),
-        settings=settings,
-    )
-
-
-def build_configured_app(
-    *,
-    settings: APISettings | None = None,
-    repository_adapter: RepositoryAdapter | None = None,
-    ai_provider_adapters: AIProviderAdapters | None = None,
-    prompt_repository: PromptRepositoryPort | None = None,
-    hybrid_search_config: HybridSearchConfig | None = None,
-    workflow_checkpointer: Any | None = None,
-) -> FastAPI:
-    settings = settings or APISettings()
-    ai_adapters = ai_provider_adapters or build_ai_provider(settings)
-    repositories = repository_adapter or build_repository_adapter(settings)
-    prompts = prompt_repository or build_prompt_repository(settings)
-    return build_app(
-        AICoreDependencies(
-            ai=ai_adapters,
-            repositories=repositories,
-            prompt_repository=prompts,
-        ),
-        settings=settings,
-        hybrid_search_config=hybrid_search_config,
-        workflow_checkpointer=workflow_checkpointer,
     )

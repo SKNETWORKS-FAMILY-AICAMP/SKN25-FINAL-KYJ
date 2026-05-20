@@ -1,56 +1,76 @@
 from __future__ import annotations
 
 from foldmind_ai_core.adapters.inbound.messaging.broker import BrokerConsumer
-from foldmind_ai_core.adapters.inbound.messaging.consumer import (
+from foldmind_ai_core.adapters.inbound.messaging.consumers.document_chunk_vector_consumer import (
     DocumentChunkVectorDeletedConsumer,
     DocumentChunkVectorIndexedConsumer,
-    DocumentGraphDeletedConsumer,
-    DocumentGraphIndexedConsumer,
+)
+from foldmind_ai_core.adapters.inbound.messaging.consumers.document_vector_consumer import (
     DocumentVectorDeletedConsumer,
     DocumentVectorIndexedConsumer,
-    FolderGraphDeletedConsumer,
-    FolderGraphIndexedConsumer,
+)
+from foldmind_ai_core.adapters.inbound.messaging.consumers.folder_vector_consumer import (
     FolderVectorDeletedConsumer,
     FolderVectorIndexedConsumer,
 )
+from foldmind_ai_core.adapters.inbound.messaging.consumers.folder_signal_vector_consumer import (
+    FolderSignalVectorsDeletedConsumer,
+    FolderSignalVectorsIndexedConsumer,
+)
+from foldmind_ai_core.adapters.inbound.messaging.consumers.graph_consumer import (
+    DocumentGraphDeletedConsumer,
+    DocumentGraphFolderRelationsIndexedConsumer,
+    DocumentGraphIndexedConsumer,
+    FolderGraphDeletedConsumer,
+    FolderGraphIndexedConsumer,
+)
+from foldmind_ai_core.adapters.inbound.messaging.consumers.document_signal_vector_consumer import (
+    DocumentSignalVectorsDeletedConsumer,
+    DocumentSignalVectorsIndexedConsumer,
+)
 from foldmind_ai_core.adapters.inbound.messaging.dispatcher import (
-    IgnoreOutboxEventConsumer,
     OutboxEventDispatcher,
 )
 from foldmind_ai_core.adapters.inbound.messaging.kafka import KafkaOutboxConsumer
-from foldmind_ai_core.adapters.outbound.kafka.dlq_producer import KafkaDlqProducer
-from foldmind_ai_core.application.ports.outbound.graph_repository import GraphRepository
-from foldmind_ai_core.application.ports.outbound.vector_repository import (
-    DocumentChunkVectorRepository,
-    DocumentVectorRepository,
-    FolderVectorRepository,
+from foldmind_ai_core.adapters.outbound.kafka.dead_letter_producer import (
+    KafkaDeadLetterProducer,
 )
-from foldmind_ai_core.application.services.vector_projection_spec import VectorProjectionSpec
-from foldmind_ai_core.application.use_cases.projection import (
-    HandleDocumentChunkVectorDeletedProjectionUseCase,
-    HandleDocumentChunkVectorIndexedProjectionUseCase,
-    HandleDocumentGraphDeletedProjectionUseCase,
-    HandleDocumentGraphIndexedProjectionUseCase,
-    HandleDocumentVectorDeletedProjectionUseCase,
-    HandleDocumentVectorIndexedProjectionUseCase,
-    HandleFolderGraphDeletedProjectionUseCase,
-    HandleFolderGraphIndexedProjectionUseCase,
-    HandleFolderVectorDeletedProjectionUseCase,
-    HandleFolderVectorIndexedProjectionUseCase,
+from foldmind_ai_core.core.application.services.vector_projection_spec import VectorProjectionSpec
+from foldmind_ai_core.core.application.use_cases.projection.document_chunk_vector_projection import (
+    DeleteDocumentChunkVectorsUseCase,
+    ProjectDocumentChunkVectorsUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.projection.document_vector_projection import (
+    DeleteDocumentSignalVectorsUseCase,
+    DeleteDocumentVectorUseCase,
+    ProjectDocumentSignalVectorsUseCase,
+    ProjectDocumentVectorUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.projection.folder_vector_projection import (
+    DeleteFolderSignalVectorsUseCase,
+    DeleteFolderVectorUseCase,
+    ProjectFolderSignalVectorsUseCase,
+    ProjectFolderVectorUseCase,
+)
+from foldmind_ai_core.core.application.use_cases.projection.graph_projection import (
+    DeleteDocumentGraphUseCase,
+    DeleteFolderGraphUseCase,
+    ProjectDocumentFolderRelationsGraphUseCase,
+    ProjectDocumentGraphUseCase,
+    ProjectFolderGraphUseCase,
 )
 from foldmind_ai_core.bootstrap.container.dependencies import (
-    AIProviderAdapters,
-    OutboxProjectionRepositories,
+    AICapabilities,
+    ProjectionStorage,
 )
-from foldmind_ai_core.bootstrap.container.providers import build_ai_provider
-from foldmind_ai_core.bootstrap.container.repositories import (
-    build_outbox_projection_repository_adapter,
+from foldmind_ai_core.bootstrap.container.providers import build_ai_capabilities
+from foldmind_ai_core.bootstrap.container.storage import (
+    build_outbox_projection_storage,
 )
 from foldmind_ai_core.bootstrap.settings import APISettings, OutboxProjectionTarget
-from foldmind_ai_core.workers.outbox_runtime import (
-    DlqProducer,
-    OutboxFreshnessStore,
-    OutboxMessageProcessor,
+from foldmind_ai_core.adapters.inbound.outbox_worker.runtime import (
+    DeadLetterProducer,
+    OutboxProjectionMessageConsumer,
     OutboxWorkerRuntime,
     RetryPolicy,
 )
@@ -58,8 +78,8 @@ from foldmind_ai_core.workers.outbox_runtime import (
 
 def build_outbox_dispatcher(
     *,
-    ai: AIProviderAdapters | None,
-    repositories: OutboxProjectionRepositories,
+    ai: AICapabilities | None,
+    storage: ProjectionStorage,
     settings: APISettings,
     target: OutboxProjectionTarget,
 ) -> OutboxEventDispatcher:
@@ -67,107 +87,184 @@ def build_outbox_dispatcher(
         case OutboxProjectionTarget.QDRANT_DOCUMENT_CHUNKS:
             return _build_document_chunk_vector_dispatcher(
                 ai=ai,
-                repositories=repositories,
+                storage=storage,
                 target=target,
             )
         case OutboxProjectionTarget.QDRANT_DOCUMENTS:
             return _build_document_vector_dispatcher(
                 ai=ai,
-                repositories=repositories,
+                storage=storage,
+                settings=settings,
+                target=target,
+            )
+        case OutboxProjectionTarget.QDRANT_SIGNALS:
+            return _build_signal_vector_dispatcher(
+                ai=ai,
+                storage=storage,
                 settings=settings,
                 target=target,
             )
         case OutboxProjectionTarget.QDRANT_FOLDERS:
             return _build_folder_vector_dispatcher(
                 ai=ai,
-                repositories=repositories,
+                storage=storage,
                 settings=settings,
                 target=target,
             )
         case OutboxProjectionTarget.NEO4J_GRAPH:
-            return _build_graph_dispatcher(repositories=repositories)
-    raise RuntimeError(f"Unsupported OUTBOX_PROJECTION_TARGET: {target}")
+            return _build_graph_dispatcher(storage=storage)
+    raise RuntimeError(f"Unsupported FOLDMIND_OUTBOX_PROJECTION_TARGET: {target}")
 
 
 def _build_document_chunk_vector_dispatcher(
     *,
-    ai: AIProviderAdapters | None,
-    repositories: OutboxProjectionRepositories,
+    ai: AICapabilities | None,
+    storage: ProjectionStorage,
     target: OutboxProjectionTarget,
 ) -> OutboxEventDispatcher:
     ai = _required_outbox_ai_provider(ai, target=target)
-    chunk_vectors = _required_chunk_vectors(repositories)
-    ignored = IgnoreOutboxEventConsumer()
+    chunk_vectors = storage.chunk_vectors
+    if chunk_vectors is None:
+        raise RuntimeError("Document chunk vector store is required.")
+    projection_ledger = getattr(storage, "projection_ledger", None)
+    source_freshness = getattr(storage, "source_freshness", None)
     return OutboxEventDispatcher(
         document_indexed=DocumentChunkVectorIndexedConsumer(
-            use_case=HandleDocumentChunkVectorIndexedProjectionUseCase(
+            use_case=ProjectDocumentChunkVectorsUseCase(
                 embeddings=ai.embeddings,
                 chunk_vectors=chunk_vectors,
+                projection_ledger=projection_ledger,
+                source_freshness=source_freshness,
             ),
         ),
+        document_folder_relations_indexed=None,
         document_deleted=DocumentChunkVectorDeletedConsumer(
-            use_case=HandleDocumentChunkVectorDeletedProjectionUseCase(
+            use_case=DeleteDocumentChunkVectorsUseCase(
                 chunk_vectors=chunk_vectors,
+                projection_ledger=projection_ledger,
             ),
         ),
-        folder_indexed=ignored,
-        folder_deleted=ignored,
+        folder_indexed=None,
+        folder_deleted=None,
     )
 
 
 def _build_document_vector_dispatcher(
     *,
-    ai: AIProviderAdapters | None,
-    repositories: OutboxProjectionRepositories,
+    ai: AICapabilities | None,
+    storage: ProjectionStorage,
     settings: APISettings,
     target: OutboxProjectionTarget,
 ) -> OutboxEventDispatcher:
     ai = _required_outbox_ai_provider(ai, target=target)
-    document_vectors = _required_document_vectors(repositories)
+    document_vectors = storage.document_vectors
+    if document_vectors is None:
+        raise RuntimeError("Document vector store is required.")
     projection_spec = _vector_projection_spec(settings)
-    ignored = IgnoreOutboxEventConsumer()
+    projection_ledger = getattr(storage, "projection_ledger", None)
+    source_freshness = getattr(storage, "source_freshness", None)
     return OutboxEventDispatcher(
         document_indexed=DocumentVectorIndexedConsumer(
-            use_case=HandleDocumentVectorIndexedProjectionUseCase(
+            use_case=ProjectDocumentVectorUseCase(
                 embeddings=ai.embeddings,
                 document_vectors=document_vectors,
                 projection_spec=projection_spec,
+                projection_ledger=projection_ledger,
+                source_freshness=source_freshness,
             ),
         ),
+        document_folder_relations_indexed=None,
         document_deleted=DocumentVectorDeletedConsumer(
-            use_case=HandleDocumentVectorDeletedProjectionUseCase(
+            use_case=DeleteDocumentVectorUseCase(
                 document_vectors=document_vectors,
+                projection_ledger=projection_ledger,
             ),
         ),
-        folder_indexed=ignored,
-        folder_deleted=ignored,
+        folder_indexed=None,
+        folder_deleted=None,
+    )
+
+
+def _build_signal_vector_dispatcher(
+    *,
+    ai: AICapabilities | None,
+    storage: ProjectionStorage,
+    settings: APISettings,
+    target: OutboxProjectionTarget,
+) -> OutboxEventDispatcher:
+    ai = _required_outbox_ai_provider(ai, target=target)
+    signal_vectors = storage.signal_vectors
+    if signal_vectors is None:
+        raise RuntimeError("Signal vector store is required.")
+    projection_spec = _vector_projection_spec(settings)
+    projection_ledger = getattr(storage, "projection_ledger", None)
+    source_freshness = getattr(storage, "source_freshness", None)
+    return OutboxEventDispatcher(
+        document_indexed=DocumentSignalVectorsIndexedConsumer(
+            use_case=ProjectDocumentSignalVectorsUseCase(
+                embeddings=ai.embeddings,
+                signal_vectors=signal_vectors,
+                projection_spec=projection_spec,
+                projection_ledger=projection_ledger,
+                source_freshness=source_freshness,
+            ),
+        ),
+        document_folder_relations_indexed=None,
+        document_deleted=DocumentSignalVectorsDeletedConsumer(
+            use_case=DeleteDocumentSignalVectorsUseCase(
+                signal_vectors=signal_vectors,
+                projection_ledger=projection_ledger,
+            ),
+        ),
+        folder_indexed=FolderSignalVectorsIndexedConsumer(
+            use_case=ProjectFolderSignalVectorsUseCase(
+                embeddings=ai.embeddings,
+                signal_vectors=signal_vectors,
+                projection_spec=projection_spec,
+                projection_ledger=projection_ledger,
+                source_freshness=source_freshness,
+            ),
+        ),
+        folder_deleted=FolderSignalVectorsDeletedConsumer(
+            use_case=DeleteFolderSignalVectorsUseCase(
+                signal_vectors=signal_vectors,
+                projection_ledger=projection_ledger,
+            ),
+        ),
     )
 
 
 def _build_folder_vector_dispatcher(
     *,
-    ai: AIProviderAdapters | None,
-    repositories: OutboxProjectionRepositories,
+    ai: AICapabilities | None,
+    storage: ProjectionStorage,
     settings: APISettings,
     target: OutboxProjectionTarget,
 ) -> OutboxEventDispatcher:
     ai = _required_outbox_ai_provider(ai, target=target)
-    folder_vectors = _required_folder_vectors(repositories)
+    folder_vectors = storage.folder_vectors
+    if folder_vectors is None:
+        raise RuntimeError("Folder vector store is required.")
     projection_spec = _vector_projection_spec(settings)
-    ignored = IgnoreOutboxEventConsumer()
+    projection_ledger = getattr(storage, "projection_ledger", None)
+    source_freshness = getattr(storage, "source_freshness", None)
     return OutboxEventDispatcher(
-        document_indexed=ignored,
-        document_deleted=ignored,
+        document_indexed=None,
+        document_folder_relations_indexed=None,
+        document_deleted=None,
         folder_indexed=FolderVectorIndexedConsumer(
-            use_case=HandleFolderVectorIndexedProjectionUseCase(
+            use_case=ProjectFolderVectorUseCase(
                 embeddings=ai.embeddings,
                 folder_vectors=folder_vectors,
                 projection_spec=projection_spec,
+                projection_ledger=projection_ledger,
+                source_freshness=source_freshness,
             ),
         ),
         folder_deleted=FolderVectorDeletedConsumer(
-            use_case=HandleFolderVectorDeletedProjectionUseCase(
+            use_case=DeleteFolderVectorUseCase(
                 folder_vectors=folder_vectors,
+                projection_ledger=projection_ledger,
             ),
         ),
     )
@@ -175,32 +272,51 @@ def _build_folder_vector_dispatcher(
 
 def _build_graph_dispatcher(
     *,
-    repositories: OutboxProjectionRepositories,
+    storage: ProjectionStorage,
 ) -> OutboxEventDispatcher:
-    graph = _required_graph(repositories)
+    graph = storage.graph
+    if graph is None:
+        raise RuntimeError("Graph store is required.")
+    source_freshness = getattr(storage, "source_freshness", None)
     return OutboxEventDispatcher(
         document_indexed=DocumentGraphIndexedConsumer(
-            use_case=HandleDocumentGraphIndexedProjectionUseCase(graph=graph),
+            use_case=ProjectDocumentGraphUseCase(
+                graph=graph,
+                source_freshness=source_freshness,
+            ),
+        ),
+        document_folder_relations_indexed=DocumentGraphFolderRelationsIndexedConsumer(
+            use_case=ProjectDocumentFolderRelationsGraphUseCase(
+                graph=graph,
+                source_freshness=source_freshness,
+            ),
         ),
         document_deleted=DocumentGraphDeletedConsumer(
-            use_case=HandleDocumentGraphDeletedProjectionUseCase(graph=graph),
+            use_case=DeleteDocumentGraphUseCase(
+                graph=graph,
+            ),
         ),
         folder_indexed=FolderGraphIndexedConsumer(
-            use_case=HandleFolderGraphIndexedProjectionUseCase(graph=graph),
+            use_case=ProjectFolderGraphUseCase(
+                graph=graph,
+                source_freshness=source_freshness,
+            ),
         ),
         folder_deleted=FolderGraphDeletedConsumer(
-            use_case=HandleFolderGraphDeletedProjectionUseCase(graph=graph),
+            use_case=DeleteFolderGraphUseCase(
+                graph=graph,
+            ),
         ),
     )
 
 
 def _required_outbox_ai_provider(
-    ai: AIProviderAdapters | None,
+    ai: AICapabilities | None,
     *,
     target: OutboxProjectionTarget,
-) -> AIProviderAdapters:
+) -> AICapabilities:
     if ai is None:
-        raise RuntimeError(f"AI provider adapters are required for {target.value}.")
+        raise RuntimeError(f"AI capabilities are required for {target.value}.")
     return ai
 
 
@@ -212,59 +328,25 @@ def _vector_projection_spec(settings: APISettings) -> VectorProjectionSpec:
     )
 
 
-def _outbox_target_requires_ai(target: OutboxProjectionTarget) -> bool:
-    return target in {
-        OutboxProjectionTarget.QDRANT_DOCUMENT_CHUNKS,
-        OutboxProjectionTarget.QDRANT_DOCUMENTS,
-        OutboxProjectionTarget.QDRANT_FOLDERS,
-    }
-
-
-def _required_chunk_vectors(
-    repositories: OutboxProjectionRepositories,
-) -> DocumentChunkVectorRepository:
-    if repositories.chunk_vectors is None:
-        raise RuntimeError("Document chunk vector repository is required.")
-    return repositories.chunk_vectors
-
-
-def _required_document_vectors(
-    repositories: OutboxProjectionRepositories,
-) -> DocumentVectorRepository:
-    if repositories.document_vectors is None:
-        raise RuntimeError("Document vector repository is required.")
-    return repositories.document_vectors
-
-
-def _required_folder_vectors(
-    repositories: OutboxProjectionRepositories,
-) -> FolderVectorRepository:
-    if repositories.folder_vectors is None:
-        raise RuntimeError("Folder vector repository is required.")
-    return repositories.folder_vectors
-
-
-def _required_graph(repositories: OutboxProjectionRepositories) -> GraphRepository:
-    if repositories.graph is None:
-        raise RuntimeError("Graph repository is required.")
-    return repositories.graph
-
-
 def build_outbox_worker(
     *,
     settings: APISettings | None = None,
-    repository_adapter: OutboxProjectionRepositories | None = None,
-    ai_provider_adapters: AIProviderAdapters | None = None,
+    storage: ProjectionStorage | None = None,
+    ai_capabilities: AICapabilities | None = None,
     kafka_consumer: BrokerConsumer | None = None,
-    dlq_producer: DlqProducer | None = None,
-    outbox_freshness_store: OutboxFreshnessStore | None = None,
+    dead_letter_producer: DeadLetterProducer | None = None,
 ) -> OutboxWorkerRuntime:
     settings = settings or APISettings()
     target = settings.required_outbox_projection_target
-    ai = ai_provider_adapters
-    if ai is None and _outbox_target_requires_ai(target):
-        ai = build_ai_provider(settings)
-    repositories = repository_adapter or build_outbox_projection_repository_adapter(
+    ai = ai_capabilities
+    if ai is None and target in {
+        OutboxProjectionTarget.QDRANT_DOCUMENT_CHUNKS,
+        OutboxProjectionTarget.QDRANT_DOCUMENTS,
+        OutboxProjectionTarget.QDRANT_SIGNALS,
+        OutboxProjectionTarget.QDRANT_FOLDERS,
+    }:
+        ai = build_ai_capabilities(settings)
+    storage = storage or build_outbox_projection_storage(
         settings,
         target=target,
     )
@@ -273,40 +355,24 @@ def build_outbox_worker(
         topic=settings.kafka_outbox_topic,
         group_id=settings.outbox_consumer_group_for_projection(target),
     )
-    producer = dlq_producer or KafkaDlqProducer(
+    producer = dead_letter_producer or KafkaDeadLetterProducer(
         bootstrap_servers=settings.required_kafka_bootstrap_servers,
     )
-    freshness_store = outbox_freshness_store or _build_outbox_freshness_store(settings)
     return OutboxWorkerRuntime(
         consumer=consumer,
-        processor=OutboxMessageProcessor(
+        message_consumer=OutboxProjectionMessageConsumer(
             dispatcher=build_outbox_dispatcher(
                 ai=ai,
-                repositories=repositories,
+                storage=storage,
                 settings=settings,
                 target=target,
             ),
-            freshness_store=freshness_store,
-            dlq_producer=producer,
-            dlq_topic=settings.kafka_dlq_topic,
+            dead_letter_producer=producer,
+            dead_letter_topic=settings.kafka_dead_letter_topic,
             projection_target=target.value,
             retry_policy=RetryPolicy(
                 max_retries=settings.kafka_max_retries,
                 backoff_seconds=settings.kafka_retry_backoff_seconds,
             ),
         ),
-    )
-
-
-def _build_outbox_freshness_store(settings: APISettings) -> OutboxFreshnessStore:
-    from foldmind_ai_core.adapters.outbound.postgres.client import PostgresClient
-    from foldmind_ai_core.adapters.outbound.postgres.outbox_repository import (
-        PostgresOutboxRepository,
-    )
-    from foldmind_ai_core.adapters.outbound.postgres.settings import PostgresSettings
-
-    return PostgresOutboxRepository(
-        client=PostgresClient(
-            settings=PostgresSettings(dsn=settings.required_postgres_dsn),
-        )
     )

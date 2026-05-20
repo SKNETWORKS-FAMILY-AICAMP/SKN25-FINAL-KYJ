@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langgraph.graph import END
 
-from foldmind_ai_core.application.workflows.state.plan import WorkflowActionType
+from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
 
 PLAN = "plan"
 ROUTE_STEP = "route_step"

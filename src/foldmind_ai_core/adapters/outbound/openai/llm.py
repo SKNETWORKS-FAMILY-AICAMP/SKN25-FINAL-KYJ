@@ -7,12 +7,12 @@ from foldmind_ai_core.adapters.outbound.openai.client import (
     field_value,
 )
 from foldmind_ai_core.adapters.outbound.openai.errors import AIProviderError
-from foldmind_ai_core.application.dto.llm import LLMMessage
+from foldmind_ai_core.core.application.models.llm import LLMMessage
 from foldmind_ai_core.shared.validation import InvalidInputError, require_non_blank
 
 
 @dataclass(slots=True)
-class OpenAILLM:
+class OpenAILLMProvider:
     model: str
     client: OpenAIClient
 
@@ -36,7 +36,10 @@ class OpenAILLM:
         except Exception as exc:
             raise AIProviderError("OpenAI response generation failed.") from exc
 
-        text = field_value(response, "output_text")
+        try:
+            text = field_value(response, "output_text")
+        except (AttributeError, KeyError) as exc:
+            raise AIProviderError("OpenAI response did not include output_text.") from exc
         if not isinstance(text, str) or not text.strip():
             raise AIProviderError("OpenAI response did not include non-empty output_text.")
         return text

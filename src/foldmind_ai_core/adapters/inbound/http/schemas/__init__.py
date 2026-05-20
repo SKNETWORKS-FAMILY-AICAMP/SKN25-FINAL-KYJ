@@ -1,1 +1,0 @@
-"""REST API schema package."""

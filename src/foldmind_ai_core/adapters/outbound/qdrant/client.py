@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from qdrant_client import QdrantClient, models
 
 from foldmind_ai_core.adapters.outbound.qdrant.settings import QdrantSettings
-from foldmind_ai_core.shared.types import Metadata, Vector
-from foldmind_ai_core.shared.validation import InvalidInputError
+from foldmind_ai_core.core.application.queries.retrieval import TimestampRange
+from foldmind_ai_core.shared.internal_ids import stable_internal_id
+from foldmind_ai_core.shared.types import JsonObject, Metadata, Vector
+from foldmind_ai_core.shared.validation import InvalidInputError, require_non_blank
 
 
 @dataclass(slots=True)
@@ -16,6 +20,27 @@ class QdrantCollectionConfig:
     vector_size: int
     distance: str = "Cosine"
     payload_indexes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        self.collection_name = require_non_blank(
+            self.collection_name,
+            "collection_name",
+        )
+        if (
+            isinstance(self.vector_size, bool)
+            or not isinstance(self.vector_size, int)
+            or self.vector_size <= 0
+        ):
+            raise InvalidInputError("vector_size must be a positive integer.")
+        self.distance = require_non_blank(self.distance, "distance")
+        payload_indexes: list[str] = []
+        for field_name in self.payload_indexes:
+            if not isinstance(field_name, str):
+                raise InvalidInputError(
+                    "payload_indexes must contain non-blank strings."
+                )
+            payload_indexes.append(require_non_blank(field_name, "payload_indexes"))
+        self.payload_indexes = tuple(payload_indexes)
 
 
 @dataclass(slots=True)
@@ -37,6 +62,10 @@ class QdrantCollectionClient:
         self._ensure_collection()
         self._ensure_payload_indexes()
 
+    @property
+    def collection_name(self) -> str:
+        return self.config.collection_name
+
     def _ensure_collection(self) -> None:
         if self._collection_exists():
             return
@@ -50,7 +79,10 @@ class QdrantCollectionClient:
 
     def _collection_exists(self) -> bool:
         if hasattr(self._client, "collection_exists"):
-            return bool(self._client.collection_exists(self.config.collection_name))
+            exists = self._client.collection_exists(self.config.collection_name)
+            if not isinstance(exists, bool):
+                raise InvalidInputError("collection_exists must return a boolean.")
+            return exists
         try:
             self._client.get_collection(self.config.collection_name)
         except Exception:
@@ -59,18 +91,31 @@ class QdrantCollectionClient:
 
     def _distance(self) -> Any:
         distance = self.config.distance.upper()
-        return getattr(self._models.Distance, distance)
+        try:
+            return getattr(self._models.Distance, distance)
+        except AttributeError as exc:
+            raise InvalidInputError(
+                f"Unsupported Qdrant distance: {self.config.distance}."
+            ) from exc
 
     def _ensure_payload_indexes(self) -> None:
         if not hasattr(self._client, "create_payload_index"):
             return
-        schema = getattr(self._models.PayloadSchemaType, "KEYWORD")
         for field_name in self.config.payload_indexes:
+            schema = self._payload_schema(field_name)
             self._client.create_payload_index(
                 collection_name=self.config.collection_name,
                 field_name=field_name,
                 field_schema=schema,
             )
+
+    def _payload_schema(self, field_name: str) -> Any:
+        if field_name in {"created_at", "updated_at"} and hasattr(
+            self._models.PayloadSchemaType,
+            "DATETIME",
+        ):
+            return self._models.PayloadSchemaType.DATETIME
+        return self._models.PayloadSchemaType.KEYWORD
 
     def upsert_points(self, points: list[Any]) -> None:
         if points:
@@ -89,6 +134,8 @@ class QdrantCollectionClient:
         top_k: int,
         qdrant_filter: Any,
     ) -> list[Any]:
+        validate_vector(query_vector)
+        validate_top_k(top_k)
         if hasattr(self._client, "query_points"):
             response = self._client.query_points(
                 collection_name=self.config.collection_name,
@@ -108,13 +155,25 @@ class QdrantCollectionClient:
             )
         )
 
-    def point(self, *, key: str, vector: Vector, payload: Metadata) -> Any:
+    def point(
+        self,
+        *,
+        key: str,
+        vector: Vector,
+        payload: JsonObject,
+        point_id: str | None = None,
+    ) -> Any:
         if len(vector) != self.config.vector_size:
             raise InvalidInputError(
                 f"Expected vector size {self.config.vector_size}, got {len(vector)}."
             )
+        validate_vector(vector)
         return self._models.PointStruct(
-            id=key,
+            id=point_id or stable_internal_id(
+                "qdrant-point",
+                self.config.collection_name,
+                key,
+            ),
             vector=vector,
             payload=payload,
         )
@@ -128,56 +187,44 @@ class QdrantCollectionClient:
         document_ids: tuple[str, ...] = (),
         folder_id: str | None = None,
         folder_ids: tuple[str, ...] = (),
+        owner_kind: str | None = None,
+        signal_type: str | None = None,
+        created_at: TimestampRange | None = None,
+        updated_at: TimestampRange | None = None,
         metadata_filter: Metadata | None = None,
     ) -> Any:
         must = []
         if tenant is not None:
             must.append(self._match_value_condition("tenant", tenant))
-        must.extend(
-            self._optional_match_conditions(
-                (
-                    ("document_type", document_type),
-                    ("document_id", document_id),
-                    ("folder_id", folder_id),
+        for field_name, value in (
+            ("document_type", document_type),
+            ("document_id", document_id),
+            ("folder_id", folder_id),
+            ("owner_kind", owner_kind),
+            ("signal_type", signal_type),
+        ):
+            if value is not None:
+                must.append(self._match_value_condition(field_name, value))
+        for field_name, values in (
+            ("document_id", document_ids),
+            ("folder_id", folder_ids),
+        ):
+            if values:
+                must.append(
+                    self._models.FieldCondition(
+                        key=field_name,
+                        match=self._models.MatchAny(any=list(values)),
+                    )
                 )
-            )
-        )
-        must.extend(
-            self._optional_match_any_conditions(
-                (
-                    ("document_id", document_ids),
-                    ("folder_id", folder_ids),
-                )
-            )
-        )
-        must.extend(self._metadata_conditions(metadata_filter or {}))
+        for field_name, timestamp_range in (
+            ("created_at", created_at),
+            ("updated_at", updated_at),
+        ):
+            if timestamp_range is not None:
+                must.append(self._range_condition(field_name, timestamp_range))
+        for key, metadata_value in (metadata_filter or {}).items():
+            must.append(self._match_value_condition(f"metadata.{key}", metadata_value))
         return self._models.Filter(must=must)
-
-    def _optional_match_conditions(
-        self,
-        values: tuple[tuple[str, object | None], ...],
-    ) -> list[Any]:
-        return [
-            self._match_value_condition(field_name, value)
-            for field_name, value in values
-            if value is not None
-        ]
-
-    def _optional_match_any_conditions(
-        self,
-        values: tuple[tuple[str, tuple[str, ...]], ...],
-    ) -> list[Any]:
-        return [
-            self._match_any_condition(field_name, field_values)
-            for field_name, field_values in values
-            if field_values
-        ]
-
-    def _metadata_conditions(self, metadata_filter: Metadata) -> list[Any]:
-        return [
-            self._match_value_condition(f"metadata.{key}", value)
-            for key, value in metadata_filter.items()
-        ]
 
     def _match_value_condition(self, field_name: str, value: object) -> Any:
         return self._models.FieldCondition(
@@ -185,13 +232,36 @@ class QdrantCollectionClient:
             match=self._models.MatchValue(value=value),
         )
 
-    def _match_any_condition(self, field_name: str, values: tuple[str, ...]) -> Any:
+    def _range_condition(self, field_name: str, timestamp_range: TimestampRange) -> Any:
+        range_values = {
+            key: value
+            for key in ("gt", "gte", "lt", "lte")
+            if (value := getattr(timestamp_range, key)) is not None
+        }
+        if hasattr(self._models, "DatetimeRange"):
+            return self._models.FieldCondition(
+                key=field_name,
+                datetime_range=self._models.DatetimeRange(**range_values),
+            )
         return self._models.FieldCondition(
             key=field_name,
-            match=self._models.MatchAny(any=list(values)),
+            range=self._models.Range(**range_values),
         )
 
 
-def validate_parallel(items: list[object], vectors: list[Vector]) -> None:
+def validate_parallel(items: Sequence[object], vectors: Sequence[Vector]) -> None:
     if len(items) != len(vectors):
         raise InvalidInputError("items and vectors must have the same length.")
+
+
+def validate_vector(vector: Vector) -> None:
+    for coordinate in vector:
+        if isinstance(coordinate, bool) or not isinstance(coordinate, int | float):
+            raise InvalidInputError("vector must contain numbers.")
+        if not math.isfinite(float(coordinate)):
+            raise InvalidInputError("vector must contain finite numbers.")
+
+
+def validate_top_k(top_k: int) -> None:
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+        raise InvalidInputError("top_k must be a positive integer.")

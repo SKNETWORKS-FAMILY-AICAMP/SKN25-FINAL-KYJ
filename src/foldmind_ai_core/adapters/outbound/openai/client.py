@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from foldmind_ai_core.adapters.outbound.openai.settings import OpenAISettings
-from foldmind_ai_core.shared.validation import InvalidInputError
 
 
 @dataclass(slots=True)
@@ -14,7 +13,24 @@ class OpenAIClient:
     _sdk_client: Any = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._sdk_client = self.sdk_client or _new_openai_client(self.settings)
+        if self.sdk_client is not None:
+            self._sdk_client = self.sdk_client
+            return
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "The openai package is required when FOLDMIND_AI_PROVIDER=openai."
+            ) from exc
+
+        kwargs: dict[str, object] = {
+            "api_key": self.settings.api_key,
+            "timeout": self.settings.timeout_seconds,
+            "max_retries": self.settings.max_retries,
+        }
+        if self.settings.base_url:
+            kwargs["base_url"] = self.settings.base_url
+        self._sdk_client = OpenAI(**kwargs)
 
     def create_response(
         self,
@@ -32,21 +48,3 @@ def field_value(value: object, name: str) -> Any:
     if isinstance(value, dict):
         return value[name]
     return getattr(value, name)
-
-
-def _new_openai_client(settings: OpenAISettings) -> Any:
-    if not settings.api_key:
-        raise InvalidInputError("OPENAI_API_KEY is required when AI_PROVIDER=openai.")
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise RuntimeError("The openai package is required when AI_PROVIDER=openai.") from exc
-
-    kwargs: dict[str, object] = {
-        "api_key": settings.api_key,
-        "timeout": settings.timeout_seconds,
-        "max_retries": settings.max_retries,
-    }
-    if settings.base_url:
-        kwargs["base_url"] = settings.base_url
-    return OpenAI(**kwargs)

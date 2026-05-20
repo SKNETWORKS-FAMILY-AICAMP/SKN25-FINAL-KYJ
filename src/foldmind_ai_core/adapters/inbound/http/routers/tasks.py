@@ -1,97 +1,93 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from foldmind_ai_core.adapters.inbound.http.error_handlers import invalid_input_response
-from foldmind_ai_core.adapters.inbound.http.schemas.actions import (
+from foldmind_ai_core.adapters.inbound.http.application_errors import ApplicationErrorRoute
+from foldmind_ai_core.adapters.inbound.http.dtos.actions import (
     RecordHostActionResultRequest,
 )
-from foldmind_ai_core.adapters.inbound.http.schemas.tasks import (
-    AppendTaskRequest,
+from foldmind_ai_core.adapters.inbound.http.dtos.tasks import (
+    AppendTaskInputRequest,
     CreateTaskRequest,
     RecordHostActionResultResponse,
     TaskSnapshotResponse,
 )
-from foldmind_ai_core.application.errors import ResourceNotFoundError
-from foldmind_ai_core.application.ports.inbound.workflow_use_case import (
-    GetTaskUseCasePort,
-    RecordActionResultUseCasePort,
-    RemoveTaskRequestUseCasePort,
-    RunTaskUseCasePort,
+from foldmind_ai_core.adapters.inbound.http.mappers.actions import (
+    record_action_result_command_from_request,
 )
-from foldmind_ai_core.shared.validation import InvalidInputError
+from foldmind_ai_core.adapters.inbound.http.mappers.tasks import (
+    append_task_command_from_request,
+    create_task_command_from_request,
+    get_task_query_from_path,
+    record_action_result_response_from_result,
+    remove_task_input_command_from_path,
+    task_snapshot_response_from_result,
+)
+from foldmind_ai_core.core.application.ports.inbound.workflow import (
+    GetTaskInboundPort,
+    RecordActionResultInboundPort,
+    RemoveTaskInputInboundPort,
+    RunTaskInboundPort,
+)
 
 
 def create_tasks_router(
     *,
-    run_task: RunTaskUseCasePort,
-    get_task: GetTaskUseCasePort,
-    remove_task_request: RemoveTaskRequestUseCasePort,
-    record_action_result: RecordActionResultUseCasePort,
+    run_task: RunTaskInboundPort,
+    get_task: GetTaskInboundPort,
+    remove_task_input: RemoveTaskInputInboundPort,
+    record_action_result: RecordActionResultInboundPort,
 ) -> APIRouter:
-    router = APIRouter(prefix="/tasks", tags=["tasks"])
+    router = APIRouter(
+        prefix="/tasks",
+        tags=["tasks"],
+        route_class=ApplicationErrorRoute,
+    )
 
     @router.post("", response_model=TaskSnapshotResponse)
     def create_task_endpoint(request: CreateTaskRequest) -> TaskSnapshotResponse:
-        try:
-            snapshot = run_task.execute(request.to_model())
-        except InvalidInputError as exc:
-            raise invalid_input_response(exc) from exc
-        return TaskSnapshotResponse.from_model(snapshot)
+        result = run_task.execute(create_task_command_from_request(request))
+        return task_snapshot_response_from_result(result)
 
-    @router.post("/{task_id}/requests", response_model=TaskSnapshotResponse)
-    def append_task_request_endpoint(
+    @router.post("/{task_id}/inputs", response_model=TaskSnapshotResponse)
+    def append_task_input_endpoint(
         task_id: str,
-        request: AppendTaskRequest,
+        request: AppendTaskInputRequest,
     ) -> TaskSnapshotResponse:
-        try:
-            snapshot = run_task.execute(request.to_model(task_id=task_id))
-        except InvalidInputError as exc:
-            raise invalid_input_response(exc) from exc
-        return TaskSnapshotResponse.from_model(snapshot)
+        result = run_task.execute(
+            append_task_command_from_request(
+                task_id=task_id,
+                request=request,
+            )
+        )
+        return task_snapshot_response_from_result(result)
 
     @router.get("/{task_id}", response_model=TaskSnapshotResponse)
     def get_task_endpoint(task_id: str) -> TaskSnapshotResponse:
-        try:
-            snapshot = get_task.execute(task_id=task_id)
-        except InvalidInputError as exc:
-            raise invalid_input_response(exc) from exc
-        except ResourceNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return TaskSnapshotResponse.from_model(snapshot)
+        result = get_task.execute(get_task_query_from_path(task_id=task_id))
+        return task_snapshot_response_from_result(result)
 
     @router.delete(
-        "/requests/{task_request_id}",
+        "/inputs/{task_input_id}",
         response_model=TaskSnapshotResponse,
     )
-    def remove_task_request_endpoint(
-        task_request_id: str,
+    def remove_task_input_endpoint(
+        task_input_id: str,
     ) -> TaskSnapshotResponse:
-        try:
-            snapshot = remove_task_request.execute(
-                task_request_id=task_request_id,
+        result = remove_task_input.execute(
+            remove_task_input_command_from_path(
+                task_input_id=task_input_id,
             )
-        except InvalidInputError as exc:
-            raise invalid_input_response(exc) from exc
-        except ResourceNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return TaskSnapshotResponse.from_model(snapshot)
+        )
+        return task_snapshot_response_from_result(result)
 
     @router.post("/actions/result", response_model=RecordHostActionResultResponse)
     def record_action_result_endpoint(
         request: RecordHostActionResultRequest,
     ) -> RecordHostActionResultResponse:
-        try:
-            snapshot = record_action_result.execute(
-                result=request.to_model_result(),
-            )
-        except InvalidInputError as exc:
-            raise invalid_input_response(exc) from exc
-        except ResourceNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return RecordHostActionResultResponse(
-            recorded=True,
-            task=TaskSnapshotResponse.from_model(snapshot).task,
+        result = record_action_result.execute(
+            record_action_result_command_from_request(request)
         )
+        return record_action_result_response_from_result(result)
 
     return router

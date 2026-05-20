@@ -10,20 +10,21 @@ from foldmind_ai_core.adapters.outbound.workflow_runtime.workflow_checkpoint imp
     CHECKPOINT_STATE_VERSION,
     WorkflowCheckpointState,
 )
-from foldmind_ai_core.application.workflows.state.execution import (
+from foldmind_ai_core.core.application.workflows.state.execution import (
     WorkflowArtifactName,
     WorkflowArtifacts,
     WorkflowExecutionPlan,
     WorkflowExecutionTrace,
     WorkflowStep,
-    WorkflowStepExecution,
     WorkflowStepInput,
 )
-from foldmind_ai_core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.domain.generation.results import (
+from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
+from foldmind_ai_core.core.domain.models.generation.results import (
     AssistantClarification,
     DocumentRecommendation,
     DocumentRecommendationResult,
+    DocumentSearchItem,
+    DocumentSearchResult,
     DraftResult,
     FolderRecommendation,
     FolderRecommendationResult,
@@ -31,14 +32,16 @@ from foldmind_ai_core.domain.generation.results import (
     RelatedRecommendationItem,
     RelatedRecommendationResult,
 )
-from foldmind_ai_core.domain.indexing.chunks import DocumentChunk
-from foldmind_ai_core.domain.retrieval.queries import (
-    AIQuery,
+from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
+from foldmind_ai_core.core.application.queries.retrieval import (
+    RetrievalQuery,
     QueryAnchor,
     RequestContext,
     SearchScope,
+    SearchSort,
+    TimestampRange,
 )
-from foldmind_ai_core.domain.retrieval.results import (
+from foldmind_ai_core.core.domain.models.retrieval.results import (
     FolderRetrievalResult,
     RelatedRetrievalItem,
     RelatedRetrievalResult,
@@ -46,7 +49,7 @@ from foldmind_ai_core.domain.retrieval.results import (
     RetrievedDocument,
     RetrievedFolder,
 )
-from foldmind_ai_core.domain.workflow.actions import (
+from foldmind_ai_core.core.domain.models.workflow.actions import (
     ActionPlan,
     CreateDocumentInput,
     CreateDocumentOutput,
@@ -62,25 +65,29 @@ from foldmind_ai_core.domain.workflow.actions import (
     UpdateDocumentInput,
     UpdateDocumentOutput,
 )
-from foldmind_ai_core.domain.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.workflow.tasks import (
     TaskAnalysis,
-    TaskAppendRequest,
-    TaskCreationRequest,
+    TaskAppendInput,
+    TaskContext,
+    TaskCreationInput,
     TaskEvent,
-    TaskOutput,
+    TaskFinalResult,
+    TaskInputEntry,
+    TaskJob,
+    TaskJobResult,
     TaskSnapshot,
 )
-from foldmind_ai_core.shared.types import JsonValue, Metadata
+from foldmind_ai_core.shared.types import JsonObject, JsonValue, Metadata
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-_TYPE_KEY = "__ai_core_checkpoint_type__"
+_TYPE_KEY = "__foldmind_checkpoint_type__"
 _VALUE_KEY = "value"
 
 _CHECKPOINT_MODELS = (
     ActionPlan,
-    AIQuery,
+    RetrievalQuery,
     AssistantClarification,
     CreateDocumentInput,
     CreateDocumentOutput,
@@ -89,6 +96,8 @@ _CHECKPOINT_MODELS = (
     DocumentChunk,
     DocumentRecommendation,
     DocumentRecommendationResult,
+    DocumentSearchItem,
+    DocumentSearchResult,
     DraftResult,
     FolderRecommendation,
     FolderRecommendationResult,
@@ -111,11 +120,17 @@ _CHECKPOINT_MODELS = (
     RequestContext,
     RetrievalResult,
     SearchScope,
+    SearchSort,
+    TimestampRange,
     TaskAnalysis,
-    TaskAppendRequest,
-    TaskCreationRequest,
+    TaskAppendInput,
+    TaskContext,
+    TaskCreationInput,
     TaskEvent,
-    TaskOutput,
+    TaskFinalResult,
+    TaskInputEntry,
+    TaskJob,
+    TaskJobResult,
     TaskSnapshot,
     UpdateDocumentInput,
     UpdateDocumentOutput,
@@ -123,7 +138,6 @@ _CHECKPOINT_MODELS = (
     WorkflowExecutionPlan,
     WorkflowExecutionTrace,
     WorkflowStep,
-    WorkflowStepExecution,
     WorkflowStepInput,
 )
 
@@ -143,6 +157,7 @@ _CODEC = JsonModelCodec(
     value_key=_VALUE_KEY,
     localns={
         "JsonValue": JsonValue,
+        "JsonObject": JsonObject,
         "Metadata": Metadata,
     },
     post_decode=_post_decode,

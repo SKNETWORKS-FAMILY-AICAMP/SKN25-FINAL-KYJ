@@ -3,61 +3,63 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, cast
 
-from foldmind_ai_core.adapters.outbound.model_codec import (
-    model_value,
-    restore_model_value,
-)
 from foldmind_ai_core.adapters.outbound.postgres.client import (
     PostgresClient,
     jsonb,
     row_value,
 )
-from foldmind_ai_core.domain.generation.results import (
-    AssistantClarification,
-    DocumentRecommendationResult,
-    DraftResult,
-    FolderRecommendationResult,
-    GeneratedTextResult,
-    RelatedRecommendationResult,
+from foldmind_ai_core.adapters.outbound.postgres.mappers.task import (
+    host_action_records_from_snapshot,
+    task_event_records_from_snapshot,
+    task_input_records_from_snapshot,
+    task_job_records_from_snapshot,
+    task_job_result_records_from_snapshot,
+    task_record_from_snapshot,
+    task_snapshot_from_records,
 )
-from foldmind_ai_core.domain.workflow.actions import (
-    ActionPlan,
-    CreateDocumentInput,
-    CreateFolderInput,
-    HostAction,
-    HostActionPolicy,
-    HostActionStatus,
-    HostActionType,
-    LinkDocumentsInput,
-    MoveDocumentInput,
-    UpdateDocumentInput,
+from foldmind_ai_core.adapters.outbound.postgres.models.task import (
+    PostgresHostActionRecord,
+    PostgresTaskEventRecord,
+    PostgresTaskInputRecord,
+    PostgresTaskJobRecord,
+    PostgresTaskJobResultRecord,
+    PostgresTaskRecord,
 )
-from foldmind_ai_core.domain.workflow.tasks import (
-    TaskAnalysis,
-    TaskEvent,
-    TaskEventType,
-    TaskOutput,
-    TaskOutputType,
-    TaskRequestEntry,
-    TaskRequestStatus,
-    TaskSnapshot,
-    TaskStatus,
-)
-from foldmind_ai_core.shared.internal_ids import stable_internal_id
-from foldmind_ai_core.shared.types import Metadata
+from foldmind_ai_core.core.domain.models.workflow.tasks import TaskSnapshot
+from foldmind_ai_core.shared.types import JsonObject
+
+_UPSERT_TENANT_SCOPE_SQL = """
+INSERT INTO tenant_storage_scopes (tenant_id, updated_at)
+VALUES (%s, now())
+ON CONFLICT (tenant_id)
+DO UPDATE SET
+    deleted_at = NULL,
+    purge_after = NULL,
+    updated_at = now()
+"""
 
 _UPSERT_TASK_SQL = """
 INSERT INTO tasks (
     tenant,
     task_id,
     request_text,
+    context_json,
     status,
     analysis_message,
+    result_type,
+    result_json,
+    result_title,
+    result_metadata,
     metadata,
     completed_at,
     updated_at
 )
 VALUES (
+    %s,
+    %s,
+    %s,
+    %s,
+    %s,
     %s,
     %s,
     %s,
@@ -71,10 +73,19 @@ ON CONFLICT (task_id)
 DO UPDATE SET
     tenant = EXCLUDED.tenant,
     request_text = EXCLUDED.request_text,
+    context_json = EXCLUDED.context_json,
     status = EXCLUDED.status,
     analysis_message = EXCLUDED.analysis_message,
+    result_type = EXCLUDED.result_type,
+    result_json = EXCLUDED.result_json,
+    result_title = EXCLUDED.result_title,
+    result_metadata = EXCLUDED.result_metadata,
     metadata = EXCLUDED.metadata,
-    completed_at = COALESCE(EXCLUDED.completed_at, tasks.completed_at),
+    completed_at = CASE
+        WHEN EXCLUDED.status IN ('completed', 'failed', 'rejected')
+            THEN COALESCE(tasks.completed_at, EXCLUDED.completed_at)
+        ELSE NULL
+    END,
     updated_at = now()
 """
 
@@ -82,8 +93,13 @@ _GET_TASK_SQL = """
 SELECT
     tenant,
     request_text,
+    context_json,
     status,
     analysis_message,
+    result_type,
+    result_json,
+    result_title,
+    result_metadata,
     current_action_id,
     error_json,
     metadata
@@ -106,21 +122,23 @@ SET current_action_id = NULL
 WHERE task_id = %s
 """
 
-_DELETE_TASK_REQUESTS_SQL = """
-DELETE FROM task_requests
+_DELETE_TASK_INPUTS_SQL = """
+DELETE FROM task_inputs
 WHERE task_id = %s
 """
 
-_INSERT_TASK_REQUEST_SQL = """
-INSERT INTO task_requests (
-    task_request_id,
+_INSERT_TASK_INPUT_SQL = """
+INSERT INTO task_inputs (
+    task_input_id,
     task_id,
     position,
-    request,
+    input_text,
+    context_json,
     status,
-    removed_at
+    deleted_at
 )
 VALUES (
+    %s,
     %s,
     %s,
     %s,
@@ -130,50 +148,88 @@ VALUES (
 )
 """
 
-_GET_TASK_REQUESTS_SQL = """
+_GET_TASK_INPUTS_SQL = """
 SELECT
-    task_request_id,
-    request,
+    task_input_id,
+    input_text,
+    context_json,
     position,
     status
-FROM task_requests
+FROM task_inputs
 WHERE task_id = %s
 ORDER BY position ASC
 """
 
-_DELETE_TASK_OUTPUTS_SQL = """
-DELETE FROM task_outputs
+_DELETE_TASK_JOBS_SQL = """
+DELETE FROM task_jobs
 WHERE task_id = %s
 """
 
-_INSERT_TASK_OUTPUT_SQL = """
-INSERT INTO task_outputs (
-    output_id,
+_INSERT_TASK_JOB_SQL = """
+INSERT INTO task_jobs (
+    job_id,
     task_id,
+    round_index,
     position,
-    output_type,
-    title,
+    job_type,
+    status,
+    reason,
+    input_json,
+    started_at,
+    finished_at,
+    error_json,
+    metadata
+)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+_GET_TASK_JOBS_SQL = """
+SELECT
+    job_id,
+    round_index,
+    position,
+    job_type,
+    status,
+    reason,
+    input_json,
+    started_at,
+    finished_at,
+    error_json,
+    metadata
+FROM task_jobs
+WHERE task_id = %s
+ORDER BY round_index ASC, position ASC
+"""
+
+_INSERT_TASK_JOB_RESULT_SQL = """
+INSERT INTO task_job_results (
+    job_result_id,
+    job_id,
+    position,
+    result_type,
     result_json,
+    summary_json,
     metadata
 )
 VALUES (%s, %s, %s, %s, %s, %s, %s)
 """
 
-_GET_TASK_OUTPUTS_SQL = """
+_GET_TASK_JOB_RESULTS_SQL = """
 SELECT
-    output_type,
+    job_result_id,
+    job_id,
+    position,
+    result_type,
     result_json,
-    output_id,
-    title,
+    summary_json,
     metadata
-FROM task_outputs
-WHERE task_id = %s
-ORDER BY position ASC
-"""
-
-_DELETE_HOST_ACTION_DEPENDENCIES_SQL = """
-DELETE FROM host_action_dependencies
-WHERE task_id = %s
+FROM task_job_results
+WHERE job_id IN (
+    SELECT job_id
+    FROM task_jobs
+    WHERE task_id = %s
+)
+ORDER BY job_id ASC, position ASC
 """
 
 _DELETE_HOST_ACTIONS_SQL = """
@@ -185,6 +241,7 @@ _INSERT_HOST_ACTION_SQL = """
 INSERT INTO host_actions (
     action_id,
     task_id,
+    job_id,
     position,
     action_type,
     summary,
@@ -193,21 +250,9 @@ INSERT INTO host_actions (
     attempts,
     policy_json,
     input_json,
-    result_json,
     metadata
 )
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s)
-"""
-
-_INSERT_HOST_ACTION_DEPENDENCY_SQL = """
-INSERT INTO host_action_dependencies (
-    task_id,
-    action_id,
-    depends_on_action_id
-)
-VALUES (%s, %s, %s)
-ON CONFLICT (action_id, depends_on_action_id)
-DO NOTHING
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 _GET_HOST_ACTIONS_SQL = """
@@ -216,6 +261,7 @@ SELECT
     summary,
     input_json,
     action_id,
+    job_id,
     reason,
     status,
     attempts,
@@ -227,34 +273,29 @@ WHERE task_id = %s
 ORDER BY position ASC
 """
 
-_GET_HOST_ACTION_DEPENDENCIES_SQL = """
-SELECT action_id, depends_on_action_id
-FROM host_action_dependencies
-WHERE task_id = %s
-ORDER BY action_id ASC, depends_on_action_id ASC
-"""
-
 _UPSERT_TASK_EVENT_SQL = """
 INSERT INTO task_events (
     task_id,
+    job_id,
     event_id,
     event_type,
     message,
     data_json,
     created_at
 )
-VALUES (%s, %s, %s, %s, %s, now())
+VALUES (%s, %s, %s, %s, %s, %s, now())
 ON CONFLICT (event_id)
 DO UPDATE SET
+    job_id = EXCLUDED.job_id,
     event_type = EXCLUDED.event_type,
     message = EXCLUDED.message,
     data_json = EXCLUDED.data_json
 """
 
-_GET_TASK_ID_BY_REQUEST_SQL = """
+_GET_TASK_ID_BY_INPUT_SQL = """
 SELECT task_id
-FROM task_requests
-WHERE task_request_id = %s
+FROM task_inputs
+WHERE task_input_id = %s
 """
 
 _GET_TASK_ID_BY_ACTION_SQL = """
@@ -268,31 +309,12 @@ SELECT
     event_id,
     event_type,
     message,
+    job_id,
     data_json
 FROM task_events
 WHERE task_id = %s
 ORDER BY created_at ASC, event_id ASC
 """
-
-_RESULT_TYPE_BY_OUTPUT_TYPE = {
-    TaskOutputType.CLARIFICATION: AssistantClarification,
-    TaskOutputType.DOCUMENT_RECOMMENDATION: DocumentRecommendationResult,
-    TaskOutputType.FOLDER_RECOMMENDATION: FolderRecommendationResult,
-    TaskOutputType.RELATED_RECOMMENDATION: RelatedRecommendationResult,
-    TaskOutputType.ANSWER: GeneratedTextResult,
-    TaskOutputType.SUMMARY: GeneratedTextResult,
-    TaskOutputType.DRAFT: DraftResult,
-    TaskOutputType.IDEAS: GeneratedTextResult,
-    TaskOutputType.ACTION_PLAN: ActionPlan,
-}
-
-_INPUT_TYPE_BY_ACTION_TYPE = {
-    HostActionType.CREATE_FOLDER: CreateFolderInput,
-    HostActionType.CREATE_DOCUMENT: CreateDocumentInput,
-    HostActionType.UPDATE_DOCUMENT: UpdateDocumentInput,
-    HostActionType.MOVE_DOCUMENT: MoveDocumentInput,
-    HostActionType.LINK_DOCUMENTS: LinkDocumentsInput,
-}
 
 
 @dataclass(slots=True)
@@ -306,11 +328,11 @@ class PostgresTaskRepository:
         with self.client.connect() as conn:
             return self._get_with_connection(conn, task_id=task_id)
 
-    def get_by_request_id(self, *, task_request_id: str) -> TaskSnapshot | None:
+    def get_by_input_id(self, *, task_input_id: str) -> TaskSnapshot | None:
         with self.client.connect() as conn:
             row = conn.execute(
-                _GET_TASK_ID_BY_REQUEST_SQL,
-                (task_request_id,),
+                _GET_TASK_ID_BY_INPUT_SQL,
+                (task_input_id,),
             ).fetchone()
             if row is None:
                 return None
@@ -328,38 +350,26 @@ class PostgresTaskRepository:
         row = conn.execute(_GET_TASK_SQL, task_identity).fetchone()
         if row is None:
             return None
-        requests = _requests_from_rows(
-            task_id=task_id,
-            rows=conn.execute(_GET_TASK_REQUESTS_SQL, task_identity).fetchall(),
-        )
-        outputs = _outputs_from_rows(
-            conn.execute(_GET_TASK_OUTPUTS_SQL, task_identity).fetchall()
-        )
-        host_actions = _host_actions_from_rows(
-            action_rows=conn.execute(_GET_HOST_ACTIONS_SQL, task_identity).fetchall(),
-            dependency_rows=conn.execute(
-                _GET_HOST_ACTION_DEPENDENCIES_SQL,
-                task_identity,
-            ).fetchall(),
-        )
-        events = _events_from_rows(
-            conn.execute(_GET_TASK_EVENTS_SQL, task_identity).fetchall()
-        )
-        return TaskSnapshot(
-            task_id=task_id,
-            tenant=_str(row, "tenant", 0),
-            request=_str(row, "request_text", 1),
-            status=TaskStatus(_str(row, "status", 2)),
-            analysis=TaskAnalysis(
-                message=_str(row, "analysis_message", 3),
-                outputs=outputs,
+        task = _task_record_from_row(task_id=task_id, row=row)
+        return task_snapshot_from_records(
+            task=task,
+            inputs=_task_input_records_from_rows(
+                task_id=task_id,
+                rows=conn.execute(_GET_TASK_INPUTS_SQL, task_identity).fetchall(),
             ),
-            requests=requests,
-            host_actions=host_actions,
-            error=_error_text(row_value(row, "error_json", 5)),
-            current_action_id=_optional_str(row, "current_action_id", 4),
-            events=events,
-            metadata=_metadata(row_value(row, "metadata", 6)),
+            jobs=_task_job_records_from_rows(
+                task_id=task_id,
+                rows=conn.execute(_GET_TASK_JOBS_SQL, task_identity).fetchall(),
+            ),
+            job_results=_task_job_result_records_from_rows(
+                conn.execute(_GET_TASK_JOB_RESULTS_SQL, task_identity).fetchall()
+            ),
+            host_actions=_host_action_records_from_rows(
+                conn.execute(_GET_HOST_ACTIONS_SQL, task_identity).fetchall()
+            ),
+            events=_task_event_records_from_rows(
+                conn.execute(_GET_TASK_EVENTS_SQL, task_identity).fetchall()
+            ),
         )
 
     def save(self, snapshot: TaskSnapshot) -> None:
@@ -367,246 +377,315 @@ class PostgresTaskRepository:
 
     def _save(self, snapshot: TaskSnapshot) -> None:
         task_identity = (snapshot.task_id,)
-        with self.client.connect() as conn:
+        task_record = task_record_from_snapshot(snapshot)
+        with self.client.transaction() as conn:
+            conn.execute(_UPSERT_TENANT_SCOPE_SQL, (task_record.tenant,))
             conn.execute(
                 _UPSERT_TASK_SQL,
                 (
-                    snapshot.tenant,
-                    snapshot.task_id,
-                    snapshot.request,
-                    str(snapshot.status),
-                    snapshot.analysis.message,
-                    jsonb(snapshot.metadata),
-                    str(snapshot.status),
+                    task_record.tenant,
+                    task_record.task_id,
+                    task_record.request_text,
+                    jsonb(task_record.context_json),
+                    task_record.status,
+                    task_record.analysis_message,
+                    task_record.result_type,
+                    jsonb(task_record.result_json)
+                    if task_record.result_json is not None
+                    else None,
+                    task_record.result_title,
+                    jsonb(task_record.result_metadata),
+                    jsonb(task_record.metadata),
+                    task_record.status,
                 ),
             )
-            _replace_requests(conn, task_identity, snapshot.requests)
-            _replace_outputs(conn, task_identity, snapshot.analysis.outputs)
+            _replace_inputs(
+                conn,
+                task_identity,
+                task_input_records_from_snapshot(snapshot),
+            )
+            _replace_jobs(
+                conn,
+                task_identity,
+                task_job_records_from_snapshot(snapshot),
+                task_job_result_records_from_snapshot(snapshot),
+            )
             conn.execute(_CLEAR_TASK_CURRENT_ACTION_SQL, task_identity)
-            _replace_host_actions(conn, task_identity, snapshot.host_actions)
+            _replace_host_actions(
+                conn,
+                task_identity,
+                host_action_records_from_snapshot(snapshot),
+            )
             conn.execute(
                 _UPDATE_TASK_RUNTIME_SQL,
                 (
-                    snapshot.current_action_id,
-                    _nullable_jsonb(_error_json(snapshot.error)),
-                    snapshot.task_id,
+                    task_record.current_action_id,
+                    jsonb(task_record.error_json)
+                    if task_record.error_json is not None
+                    else None,
+                    task_record.task_id,
                 ),
             )
-            for event in snapshot.events:
-                _upsert_event(
-                    conn,
-                    task_id=snapshot.task_id,
-                    event=event,
-                )
+            for event in task_event_records_from_snapshot(snapshot):
+                _upsert_event(conn, task_id=snapshot.task_id, event=event)
 
 
-def _replace_requests(
+def _replace_inputs(
     conn: Any,
     task_identity: tuple[str],
-    requests: list[TaskRequestEntry],
+    inputs: tuple[PostgresTaskInputRecord, ...],
 ) -> None:
-    conn.execute(_DELETE_TASK_REQUESTS_SQL, task_identity)
-    for request in sorted(requests, key=lambda item: item.position):
+    conn.execute(_DELETE_TASK_INPUTS_SQL, task_identity)
+    for task_input in inputs:
         conn.execute(
-            _INSERT_TASK_REQUEST_SQL,
+            _INSERT_TASK_INPUT_SQL,
             (
-                request.task_request_id,
-                *task_identity,
-                request.position,
-                request.request,
-                str(request.status),
-                str(request.status),
+                task_input.task_input_id,
+                task_input.task_id,
+                task_input.position,
+                task_input.input_text,
+                jsonb(task_input.context_json),
+                task_input.status,
+                task_input.status,
             ),
         )
 
 
-def _requests_from_rows(*, task_id: str, rows: list[Any]) -> list[TaskRequestEntry]:
-    return [
-        TaskRequestEntry(
-            task_request_id=_str(row, "task_request_id", 0),
+def _task_input_records_from_rows(
+    *,
+    task_id: str,
+    rows: list[Any],
+) -> tuple[PostgresTaskInputRecord, ...]:
+    return tuple(
+        PostgresTaskInputRecord(
+            task_input_id=_str(row, "task_input_id", 0),
             task_id=task_id,
-            request=_str(row, "request", 1),
-            position=_int(row, "position", 2),
-            status=TaskRequestStatus(_str(row, "status", 3)),
+            input_text=_str(row, "input_text", 1),
+            context_json=_json_object(row_value(row, "context_json", 2), "context_json"),
+            position=_int(row, "position", 3),
+            status=_str(row, "status", 4),
         )
         for row in rows
-    ]
+    )
 
 
-def _replace_outputs(
+def _replace_jobs(
     conn: Any,
     task_identity: tuple[str],
-    outputs: list[TaskOutput],
+    jobs: tuple[PostgresTaskJobRecord, ...],
+    job_results: tuple[PostgresTaskJobResultRecord, ...],
 ) -> None:
-    conn.execute(_DELETE_TASK_OUTPUTS_SQL, task_identity)
-    for position, output in enumerate(outputs):
+    conn.execute(_DELETE_TASK_JOBS_SQL, task_identity)
+    for job in jobs:
         conn.execute(
-            _INSERT_TASK_OUTPUT_SQL,
+            _INSERT_TASK_JOB_SQL,
             (
-                _output_id(output, position, task_identity[0]),
-                *task_identity,
-                position,
-                str(output.output_type),
-                output.title,
-                jsonb(_model_json(output.result)),
-                jsonb(output.metadata),
+                job.job_id,
+                job.task_id,
+                job.round_index,
+                job.position,
+                job.job_type,
+                job.status,
+                job.reason,
+                jsonb(job.input_json),
+                job.started_at,
+                job.finished_at,
+                jsonb(job.error_json) if job.error_json is not None else None,
+                jsonb(job.metadata),
+            ),
+        )
+    for result in job_results:
+        conn.execute(
+            _INSERT_TASK_JOB_RESULT_SQL,
+            (
+                result.job_result_id,
+                result.job_id,
+                result.position,
+                result.result_type,
+                jsonb(result.result_json),
+                jsonb(result.summary_json),
+                jsonb(result.metadata),
             ),
         )
 
 
-def _outputs_from_rows(rows: list[Any]) -> list[TaskOutput]:
-    outputs: list[TaskOutput] = []
-    for row in rows:
-        output_type = TaskOutputType(_str(row, "output_type", 0))
-        result_type = _RESULT_TYPE_BY_OUTPUT_TYPE[output_type]
-        outputs.append(
-            TaskOutput(
-                output_type=output_type,
-                result=restore_model_value(row_value(row, "result_json", 1), result_type),
-                output_id=_str(row, "output_id", 2),
-                title=_optional_str(row, "title", 3),
-                metadata=_metadata(row_value(row, "metadata", 4)),
-            )
+def _task_job_records_from_rows(
+    *,
+    task_id: str,
+    rows: list[Any],
+) -> tuple[PostgresTaskJobRecord, ...]:
+    return tuple(
+        PostgresTaskJobRecord(
+            job_id=_str(row, "job_id", 0),
+            task_id=task_id,
+            round_index=_int(row, "round_index", 1),
+            position=_int(row, "position", 2),
+            job_type=_str(row, "job_type", 3),
+            status=_str(row, "status", 4),
+            reason=_str(row, "reason", 5),
+            input_json=_json_object(row_value(row, "input_json", 6), "input_json"),
+            started_at=_optional_str(row, "started_at", 7),
+            finished_at=_optional_str(row, "finished_at", 8),
+            error_json=_optional_json_object(row_value(row, "error_json", 9), "error_json"),
+            metadata=_metadata_json_object(row_value(row, "metadata", 10)),
         )
-    return outputs
+        for row in rows
+    )
+
+
+def _task_job_result_records_from_rows(
+    rows: list[Any],
+) -> tuple[PostgresTaskJobResultRecord, ...]:
+    return tuple(
+        PostgresTaskJobResultRecord(
+            job_result_id=_str(row, "job_result_id", 0),
+            job_id=_str(row, "job_id", 1),
+            position=_int(row, "position", 2),
+            result_type=_str(row, "result_type", 3),
+            result_json=_json_object(row_value(row, "result_json", 4), "result_json"),
+            summary_json=_json_object(row_value(row, "summary_json", 5), "summary_json"),
+            metadata=_metadata_json_object(row_value(row, "metadata", 6)),
+        )
+        for row in rows
+    )
 
 
 def _replace_host_actions(
     conn: Any,
     task_identity: tuple[str],
-    actions: list[HostAction],
+    actions: tuple[PostgresHostActionRecord, ...],
 ) -> None:
-    conn.execute(_DELETE_HOST_ACTION_DEPENDENCIES_SQL, task_identity)
     conn.execute(_DELETE_HOST_ACTIONS_SQL, task_identity)
     for position, action in enumerate(actions):
-        action_id = _action_id(action, position, task_identity[0])
         conn.execute(
             _INSERT_HOST_ACTION_SQL,
             (
-                action_id,
+                action.action_id,
                 *task_identity,
+                action.job_id,
                 position,
-                str(action.action_type),
+                action.action_type,
                 action.summary,
                 action.reason,
-                str(action.status),
+                action.status,
                 action.attempts,
-                jsonb(_model_json(action.policy)),
-                jsonb(_model_json(action.input)),
-                jsonb(cast(Metadata, action.metadata)),
+                jsonb(action.policy_json),
+                jsonb(action.input_json),
+                jsonb(action.metadata),
             ),
         )
-        for depends_on_action_id in action.depends_on:
-            conn.execute(
-                _INSERT_HOST_ACTION_DEPENDENCY_SQL,
-                (*task_identity, action_id, depends_on_action_id),
-            )
 
 
-def _host_actions_from_rows(
+def _host_action_records_from_rows(
+    rows: list[Any],
+) -> tuple[PostgresHostActionRecord, ...]:
+    return tuple(
+        PostgresHostActionRecord(
+            action_type=_str(row, "action_type", 0),
+            summary=_str(row, "summary", 1),
+            input_json=_json_object(row_value(row, "input_json", 2), "input_json"),
+            action_id=_str(row, "action_id", 3),
+            job_id=_optional_str(row, "job_id", 4),
+            reason=_str(row, "reason", 5),
+            status=_str(row, "status", 6),
+            attempts=_int(row, "attempts", 7),
+            policy_json=_json_object(row_value(row, "policy_json", 8), "policy_json"),
+            metadata=_metadata_json_object(row_value(row, "metadata", 9)),
+        )
+        for row in rows
+    )
+
+
+def _upsert_event(
+    conn: Any,
     *,
-    action_rows: list[Any],
-    dependency_rows: list[Any],
-) -> list[HostAction]:
-    dependencies_by_action_id: dict[str, list[str]] = {}
-    for row in dependency_rows:
-        dependencies_by_action_id.setdefault(_str(row, "action_id", 0), []).append(
-            _str(row, "depends_on_action_id", 1)
-        )
-
-    actions: list[HostAction] = []
-    for row in action_rows:
-        action_type = HostActionType(_str(row, "action_type", 0))
-        input_type = _INPUT_TYPE_BY_ACTION_TYPE[action_type]
-        action_id = _str(row, "action_id", 3)
-        actions.append(
-            HostAction(
-                action_type=action_type,
-                summary=_str(row, "summary", 1),
-                input=restore_model_value(row_value(row, "input_json", 2), input_type),
-                action_id=action_id,
-                reason=_str(row, "reason", 4),
-                status=HostActionStatus(_str(row, "status", 5)),
-                attempts=_int(row, "attempts", 6),
-                depends_on=dependencies_by_action_id.get(action_id, []),
-                policy=restore_model_value(
-                    row_value(row, "policy_json", 7),
-                    HostActionPolicy,
-                ),
-                metadata=_metadata(row_value(row, "metadata", 8)),
-            )
-        )
-    return actions
-
-
-def _upsert_event(conn: Any, *, task_id: str, event: TaskEvent) -> None:
+    task_id: str,
+    event: PostgresTaskEventRecord,
+) -> None:
     conn.execute(
         _UPSERT_TASK_EVENT_SQL,
         (
             task_id,
+            event.job_id,
             event.event_id,
-            str(event.event_type),
+            event.event_type,
             event.message,
-            jsonb(cast(Metadata, event.data)),
+            jsonb(event.data_json),
         ),
     )
 
 
-def _events_from_rows(rows: list[Any]) -> list[TaskEvent]:
-    return [
-        TaskEvent(
+def _task_event_records_from_rows(
+    rows: list[Any],
+) -> tuple[PostgresTaskEventRecord, ...]:
+    return tuple(
+        PostgresTaskEventRecord(
             event_id=_str(row, "event_id", 0),
-            event_type=TaskEventType(_str(row, "event_type", 1)),
+            event_type=_str(row, "event_type", 1),
             message=_str(row, "message", 2),
-            data=_metadata(row_value(row, "data_json", 3)),
+            job_id=_optional_str(row, "job_id", 3),
+            data_json=_metadata_json_object(row_value(row, "data_json", 4)),
         )
         for row in rows
-    ]
+    )
 
 
-def _model_json(value: object) -> Metadata:
-    return cast(Metadata, model_value(value))
+def _task_record_from_row(*, task_id: str, row: Any) -> PostgresTaskRecord:
+    return PostgresTaskRecord(
+        task_id=task_id,
+        tenant=_str(row, "tenant", 0),
+        request_text=_str(row, "request_text", 1),
+        context_json=_json_object(row_value(row, "context_json", 2), "context_json"),
+        status=_str(row, "status", 3),
+        analysis_message=_str(row, "analysis_message", 4),
+        result_type=_optional_str(row, "result_type", 5),
+        result_json=_optional_json_object(row_value(row, "result_json", 6), "result_json"),
+        result_title=_optional_str(row, "result_title", 7),
+        result_metadata=_metadata_json_object(row_value(row, "result_metadata", 8)),
+        current_action_id=_optional_str(row, "current_action_id", 9),
+        error_json=_optional_json_object(row_value(row, "error_json", 10), "error_json"),
+        metadata=_metadata_json_object(row_value(row, "metadata", 11)),
+    )
 
 
-def _error_json(error: str | None) -> Metadata | None:
-    return {"message": error} if error is not None else None
+def _optional_json_object(value: object, key: str) -> JsonObject | None:
+    if value is None:
+        return None
+    return _json_object(value, key)
 
 
-def _nullable_jsonb(value: Metadata | None) -> object | None:
-    return jsonb(value) if value is not None else None
+def _json_object(value: object, key: str) -> JsonObject:
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must contain a JSON object.")
+    return cast(JsonObject, value)
 
 
-def _error_text(value: object) -> str | None:
-    if isinstance(value, dict):
-        message = value.get("message")
-        if isinstance(message, str) and message:
-            return message
-    return None
-
-
-def _output_id(output: TaskOutput, position: int, task_id: str) -> str:
-    return output.output_id or stable_internal_id("task-output", task_id, position)
-
-
-def _action_id(action: HostAction, position: int, task_id: str) -> str:
-    return action.action_id or stable_internal_id("host-action", task_id, position)
-
-
-def _metadata(value: object) -> Metadata:
-    return cast(Metadata, value if isinstance(value, dict) else {})
+def _metadata_json_object(value: object) -> JsonObject:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("metadata fields must contain JSON objects.")
+    return cast(JsonObject, value)
 
 
 def _str(row: Any, key: str, index: int) -> str:
-    return str(row_value(row, key, index) or "")
+    value = row_value(row, key, index)
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string.")
+    return value
 
 
 def _optional_str(row: Any, key: str, index: int) -> str | None:
     value = row_value(row, key, index)
     if value is None:
         return None
-    text = str(value)
-    return text if text else None
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string.")
+    return value or None
 
 
 def _int(row: Any, key: str, index: int) -> int:
-    return int(row_value(row, key, index))
+    value = row_value(row, key, index)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be an integer.")
+    return value

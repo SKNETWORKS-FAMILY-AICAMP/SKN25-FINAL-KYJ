@@ -13,11 +13,11 @@
     "tombstones.on.delete": "false",
     "transforms": "outbox",
     "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
-    "transforms.outbox.table.field.event.id": "id",
-    "transforms.outbox.table.field.event.key": "event_key",
+    "transforms.outbox.table.field.event.id": "event_id",
+    "transforms.outbox.table.field.event.key": "partition_key",
     "transforms.outbox.table.field.event.type": "event_type",
     "transforms.outbox.table.field.event.payload": "payload",
     "transforms.outbox.route.topic.replacement": "indexing-events",
-    "transforms.outbox.table.fields.additional.placement": "sequence:envelope,event_key:envelope,aggregate_type:envelope,aggregate_id:envelope,event_schema_version:envelope,created_at:envelope"
+    "transforms.outbox.table.fields.additional.placement": "event_sequence:envelope,tenant_id:envelope,partition_key:envelope,source_kind:envelope,source_id:envelope,payload_schema_version:envelope,idempotency_key:envelope"
   }
 }

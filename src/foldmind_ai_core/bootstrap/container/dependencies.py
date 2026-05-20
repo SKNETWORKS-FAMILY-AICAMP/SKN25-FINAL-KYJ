@@ -2,54 +2,65 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from foldmind_ai_core.application.ports.outbound.embedding import EmbeddingProvider
-from foldmind_ai_core.application.ports.outbound.graph_repository import GraphRepository
-from foldmind_ai_core.application.ports.outbound.indexing_unit_of_work import (
+from foldmind_ai_core.core.application.ports.outbound.embedding import EmbeddingProvider
+from foldmind_ai_core.core.application.ports.outbound.graph_store import GraphStore
+from foldmind_ai_core.core.application.ports.outbound.indexed_document_source import (
+    IndexedDocumentSourceRepository,
+)
+from foldmind_ai_core.core.application.ports.outbound.indexing_unit_of_work import (
     IndexingUnitOfWork,
 )
-from foldmind_ai_core.application.ports.outbound.llm import LLM
-from foldmind_ai_core.application.ports.outbound.profile_repository import ProfileRepository
-from foldmind_ai_core.application.ports.outbound.prompt_repository import PromptRepositoryPort
-from foldmind_ai_core.application.ports.outbound.task_repository import TaskRepository
-from foldmind_ai_core.application.ports.outbound.vector_repository import (
-    DocumentChunkVectorRepository,
-    DocumentKeywordRepository,
-    DocumentVectorRepository,
-    FolderVectorRepository,
+from foldmind_ai_core.core.application.ports.outbound.llm import LLMProvider
+from foldmind_ai_core.core.application.ports.outbound.projection_ledger import (
+    ProjectionLedger,
+)
+from foldmind_ai_core.core.application.ports.outbound.prompt_store import PromptStore
+from foldmind_ai_core.core.application.ports.outbound.source_freshness import (
+    SourceFreshnessChecker,
+)
+from foldmind_ai_core.core.application.ports.outbound.task_repository import TaskRepository
+from foldmind_ai_core.core.application.ports.outbound.vector_store import (
+    DocumentChunkVectorStore,
+    DocumentVectorStore,
+    FolderVectorStore,
+    SignalVectorStore,
 )
 
 
 @dataclass(slots=True)
-class RepositoryAdapter:
+class ApplicationStorage:
     task_repository: TaskRepository
-    profile_repository: ProfileRepository
     indexing_uow: IndexingUnitOfWork
-    chunk_vectors: DocumentChunkVectorRepository
-    document_vectors: DocumentVectorRepository
-    folder_vectors: FolderVectorRepository
-    graph: GraphRepository
-    keyword_repository: DocumentKeywordRepository | None = None
+    indexed_document_sources: IndexedDocumentSourceRepository
+    chunk_vectors: DocumentChunkVectorStore
+    document_vectors: DocumentVectorStore
+    folder_vectors: FolderVectorStore
+    graph: GraphStore
+    signal_vectors: SignalVectorStore
 
 
 @dataclass(slots=True)
-class OutboxProjectionRepositoryAdapter:
-    chunk_vectors: DocumentChunkVectorRepository | None = None
-    document_vectors: DocumentVectorRepository | None = None
-    folder_vectors: FolderVectorRepository | None = None
-    graph: GraphRepository | None = None
+class OutboxProjectionStorage:
+    chunk_vectors: DocumentChunkVectorStore | None = None
+    document_vectors: DocumentVectorStore | None = None
+    signal_vectors: SignalVectorStore | None = None
+    folder_vectors: FolderVectorStore | None = None
+    graph: GraphStore | None = None
+    projection_ledger: ProjectionLedger | None = None
+    source_freshness: SourceFreshnessChecker | None = None
 
 
-OutboxProjectionRepositories = RepositoryAdapter | OutboxProjectionRepositoryAdapter
+ProjectionStorage = ApplicationStorage | OutboxProjectionStorage
 
 
 @dataclass(slots=True)
-class AIProviderAdapters:
-    llm: LLM
+class AICapabilities:
+    llm: LLMProvider
     embeddings: EmbeddingProvider
 
 
 @dataclass(slots=True)
-class AICoreDependencies:
-    ai: AIProviderAdapters
-    repositories: RepositoryAdapter
-    prompt_repository: PromptRepositoryPort
+class ApplicationDependencies:
+    ai: AICapabilities
+    storage: ApplicationStorage
+    prompt_store: PromptStore

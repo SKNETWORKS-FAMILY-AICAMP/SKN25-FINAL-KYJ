@@ -2,23 +2,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from foldmind_ai_core.application.ports.outbound.prompt_repository import PromptRepositoryPort
-from foldmind_ai_core.bootstrap.container.dependencies import AIProviderAdapters
+from foldmind_ai_core.core.application.ports.outbound.prompt_store import PromptStore
+from foldmind_ai_core.bootstrap.container.dependencies import AICapabilities
 from foldmind_ai_core.bootstrap.settings import AIProvider, APISettings
 
 
-def build_ai_provider(settings: APISettings) -> AIProviderAdapters:
+def build_ai_capabilities(settings: APISettings) -> AICapabilities:
     try:
         provider = AIProvider(settings.ai_provider)
     except ValueError as exc:
-        raise RuntimeError(f"Unsupported AI_PROVIDER: {settings.ai_provider}") from exc
+        raise RuntimeError(
+            f"Unsupported FOLDMIND_AI_PROVIDER: {settings.ai_provider}"
+        ) from exc
 
     if provider is AIProvider.OPENAI:
         from foldmind_ai_core.adapters.outbound.openai.client import OpenAIClient
         from foldmind_ai_core.adapters.outbound.openai.embeddings import (
             OpenAIEmbeddingProvider,
         )
-        from foldmind_ai_core.adapters.outbound.openai.llm import OpenAILLM
+        from foldmind_ai_core.adapters.outbound.openai.llm import OpenAILLMProvider
         from foldmind_ai_core.adapters.outbound.openai.settings import (
             OpenAISettings,
         )
@@ -31,27 +33,27 @@ def build_ai_provider(settings: APISettings) -> AIProviderAdapters:
                 max_retries=settings.openai_max_retries,
             )
         )
-        return AIProviderAdapters(
-            llm=OpenAILLM(model=settings.llm_model, client=client),
+        return AICapabilities(
+            llm=OpenAILLMProvider(model=settings.llm_model, client=client),
             embeddings=OpenAIEmbeddingProvider(
                 model=settings.required_embedding_model,
                 dimensions=settings.embedding_dimensions,
                 client=client,
             ),
         )
-    raise RuntimeError(f"Unsupported AI_PROVIDER: {settings.ai_provider}")
+    raise RuntimeError(f"Unsupported FOLDMIND_AI_PROVIDER: {settings.ai_provider}")
 
 
-def build_prompt_repository(settings: APISettings) -> PromptRepositoryPort:
-    from foldmind_ai_core.adapters.outbound.prompt_repository.file_prompt_repository import (
-        FilePromptRepository,
+def build_prompt_store(settings: APISettings) -> PromptStore:
+    from foldmind_ai_core.adapters.outbound.prompt_store.file_prompt_store import (
+        FilePromptStore,
     )
 
     prompt_root = settings.prompt_root.strip() if settings.prompt_root else None
     root = Path(prompt_root) if prompt_root else default_prompt_root()
     if not root.is_dir():
         raise RuntimeError(f"Prompt root does not exist: {root}")
-    return FilePromptRepository(root=root)
+    return FilePromptStore(root=root)
 
 
 def default_prompt_root() -> Path:

@@ -15,9 +15,9 @@ target_metadata = None
 
 
 def database_url() -> str:
-    url = os.getenv("POSTGRES_DSN") or os.getenv("FOLDMIND_POSTGRES_DSN")
+    url = os.getenv("FOLDMIND_POSTGRES_DSN")
     if not url:
-        raise RuntimeError("Set POSTGRES_DSN or FOLDMIND_POSTGRES_DSN to run migrations.")
+        raise RuntimeError("Set FOLDMIND_POSTGRES_DSN to run migrations.")
     return url
 
 
