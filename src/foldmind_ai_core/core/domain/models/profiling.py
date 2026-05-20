@@ -70,6 +70,7 @@ class FolderSignal:
     extractor_name: str = ""
     extractor_version: str = ""
     metadata: Metadata = field(default_factory=dict)
+    folder_signal_input_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +82,7 @@ class DocumentProfile:
     created_at: str
     updated_at: str
     title: str
-    signal_set_version: str
+    signal_generation_version: str
     model: str = ""
     metadata: Metadata = field(default_factory=dict)
 
@@ -95,5 +96,5 @@ class DocumentSignalExtraction:
 @dataclass(frozen=True, slots=True)
 class FolderSignalExtraction:
     signals: tuple[FolderSignal, ...]
-    signal_set_version: str = "1"
+    signal_generation_version: str = "1"
     model: str = ""

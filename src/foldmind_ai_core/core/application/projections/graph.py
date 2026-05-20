@@ -49,7 +49,7 @@ class DocumentSignalProjection:
     created_at: str
     updated_at: str
     title: str
-    signal_set_version: str
+    signal_generation_version: str
     signals: tuple[DocumentSignalNodeProjection, ...] = ()
     metadata: Metadata = field(default_factory=dict)
 
@@ -79,6 +79,7 @@ class FolderSignalNodeProjection:
     attributes: Metadata = field(default_factory=dict)
     confidence: float | None = None
     metadata: Metadata = field(default_factory=dict)
+    folder_signal_input_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,3 +88,4 @@ class FolderSignalProjection:
     folder_id: str
     source_version: str
     signals: tuple[FolderSignalNodeProjection, ...] = ()
+    folder_signal_input_revision: int = 0

@@ -594,7 +594,7 @@ def _document_indexed_event():
         created_at=document.created_at,
         updated_at=document.updated_at,
         title=document.title,
-        signal_set_version="signal-set-v1",
+        signal_generation_version="signal-set-v1",
     )
     return document_indexed_event(
         document=document,
@@ -609,7 +609,7 @@ def _document_folder_relations_indexed_event():
         SourceDocumentFolderRelationSnapshot(
             tenant="tenant-1",
             document_id="doc-1",
-            source_version="rel-v2",
+            source_version="v2",
             folder_ids=("folder-2",),
         )
     )

@@ -35,7 +35,19 @@ class DocumentDeletedProjectionEvent:
 @dataclass(frozen=True, slots=True)
 class FolderIndexedProjectionEvent:
     folder: ProjectionFolder
+
+
+@dataclass(frozen=True, slots=True)
+class FolderSignalsIndexedProjectionEvent:
+    folder: ProjectionFolder
+    folder_signal_input_revision: int
     signals: tuple[ProjectionFolderSignal, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class FolderSignalsInvalidatedProjectionEvent:
+    folder_id: str
+    folder_signal_input_revision: int
 
 
 @dataclass(frozen=True, slots=True)

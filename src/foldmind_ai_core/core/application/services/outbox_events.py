@@ -15,6 +15,7 @@ from foldmind_ai_core.core.domain.models.profiling import (
     SignalEvidence,
 )
 from foldmind_ai_core.core.application.models.indexing import (
+    FolderSignalInvalidation,
     SourceDocumentFolderRelationSnapshot,
 )
 from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
@@ -103,7 +104,6 @@ def document_folder_relations_indexed_event(
 def folder_indexed_event(
     *,
     folder: SourceFolder,
-    signals: tuple[FolderSignal, ...] = (),
 ) -> OutboxEvent:
     return OutboxEvent(
         tenant=folder.tenant,
@@ -112,10 +112,41 @@ def folder_indexed_event(
         event_type=str(OutboxEventType.FOLDER_INDEXED),
         payload={
             "source_folder": source_folder_payload(folder),
-            "signals": [
-                folder_signal_payload(signal)
-                for signal in signals
-            ],
+        },
+    )
+
+
+def folder_signals_invalidated_event(
+    invalidation: FolderSignalInvalidation,
+) -> OutboxEvent:
+    return OutboxEvent(
+        tenant=invalidation.tenant,
+        source_kind=str(OutboxSourceKind.FOLDER),
+        source_id=invalidation.folder_id,
+        event_type=str(OutboxEventType.FOLDER_SIGNALS_INVALIDATED),
+        payload={
+            "tenant": invalidation.tenant,
+            "folder_id": invalidation.folder_id,
+            "folder_signal_input_revision": invalidation.folder_signal_input_revision,
+        },
+    )
+
+
+def folder_signals_indexed_event(
+    *,
+    folder: SourceFolder,
+    folder_signal_input_revision: int,
+    signals: tuple[FolderSignal, ...],
+) -> OutboxEvent:
+    return OutboxEvent(
+        tenant=folder.tenant,
+        source_kind=str(OutboxSourceKind.FOLDER),
+        source_id=folder.folder_id,
+        event_type=str(OutboxEventType.FOLDER_SIGNALS_INDEXED),
+        payload={
+            "source_folder": source_folder_payload(folder),
+            "folder_signal_input_revision": folder_signal_input_revision,
+            "signals": [folder_signal_payload(signal) for signal in signals],
         },
     )
 
@@ -229,7 +260,7 @@ def document_profile_payload(
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
         "title": profile.title,
-        "signal_set_version": profile.signal_set_version,
+        "signal_generation_version": profile.signal_generation_version,
         "model": profile.model,
         "metadata": profile.metadata,
     }
@@ -270,6 +301,7 @@ def folder_signal_payload(
         "tenant": signal.tenant,
         "folder_id": signal.folder_id,
         "source_version": signal.source_version,
+        "folder_signal_input_revision": signal.folder_signal_input_revision,
         "signal_type": str(signal.signal_type),
         "signal_key": signal.signal_key,
         "text": signal.text,

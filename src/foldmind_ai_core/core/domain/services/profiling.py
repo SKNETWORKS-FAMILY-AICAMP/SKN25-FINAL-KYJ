@@ -203,6 +203,7 @@ def create_folder_signal(
     extractor_name: str,
     extractor_version: str,
     metadata: Metadata | None = None,
+    folder_signal_input_revision: int = 0,
 ) -> FolderSignal:
     resolved_type = folder_signal_type(signal_type)
     clean_key = _required_text(signal_key, "signal_key")
@@ -236,6 +237,7 @@ def create_folder_signal(
         extractor_name=extractor_name.strip(),
         extractor_version=extractor_version.strip(),
         metadata=dict(metadata or {}),
+        folder_signal_input_revision=folder_signal_input_revision,
     )
 
 

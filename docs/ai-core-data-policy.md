@@ -9,6 +9,7 @@
 - 원본 문서, 폴더, 폴더-문서 관계, 원본 태그, 권한, tenant 정책은 App Server가 소유한다.
 - 폴더-문서 관계는 문서별 folder relation snapshot으로 전달된다.
 - AI-Core는 관계 cardinality 정책을 소유하지 않는다. App Server가 문서별로 여러 `folder_id`를 보내면 n:n처럼 동작하고, 항상 하나 이하의 `folder_id`만 보내면 1:n처럼 동작한다.
+- 문서가 아무 폴더에도 속하지 않는 상태는 빈 `folder_ids`를 가진 folder relation snapshot으로 전달된다.
 - AI-Core는 원본 데이터를 canonical 데이터로 소유하지 않는다.
 - AI-Core는 검색, 추천, 요약, 그래프 탐색, RAG를 위한 파생 데이터만 소유한다.
 - 태그 정보가 필요하면 App Server가 source metadata에 opaque 값으로 전달할 수 있지만, AI-Core는 이를 태그 관계나 태그 검색 scope로 해석하지 않는다.
@@ -31,11 +32,16 @@
 ## 4. Source Version
 
 - `source_version`은 App Server가 제공하는 source 변경 버전이다.
-- 문서나 폴더의 의미 있는 입력이 바뀌면 App Server는 반드시 `source_version`을 바꿔야 한다.
+- 문서의 `source_version`은 본문만의 버전이 아니라 문서 aggregate version이다.
+- 문서 title/content/metadata 또는 폴더 membership이 바뀌면 App Server는 반드시 해당 문서의 `source_version`을 바꿔야 한다.
+- 폴더 추가, 제거, 이동, 전체 비움은 모두 문서 aggregate version 증가 대상이다.
+- Folder relation snapshot의 `source_version`은 별도 relation version이 아니라 같은 문서 aggregate `source_version`이어야 한다.
 - `source_version`은 같은 문서나 폴더 안에서 문자열 사전식 정렬로 비교 가능해야 하며, 의미 있는 입력이 바뀔 때마다 단조 증가해야 한다.
 - AI-Core와 App Server 사이의 계약은 문자열 사전식 정렬에서 더 큰 `source_version`이 더 최신 source임을 보장한다.
 - AI-Core는 오래된 비동기 작업 결과가 최신 결과를 덮어쓰지 못하도록 `source_version`을 기준으로 최신성을 확인한다.
 - 문서는 본문 변경 여부도 함께 확인해 stale result를 막는다.
+- AI-Core는 folder relation snapshot을 적용할 때 현재 document source의 `source_version`과 snapshot `source_version`이 일치하는 경우에만 반영한다.
+- Relation snapshot이 document source indexing보다 먼저 도착하면 적용하지 않는다. App Server는 document source indexing 이후 relation snapshot을 보내거나 재전송해야 한다.
 
 ## 5. 분석 결과
 

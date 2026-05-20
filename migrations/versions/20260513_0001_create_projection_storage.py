@@ -52,6 +52,7 @@ CREATE TRIGGER {table_name}_set_updated_at
 SCHEMA_SQL_FILES: tuple[SqlFile, ...] = (
     ("postgres extensions", "00_extensions.sql"),
     ("tenant and source snapshots", "10_tenant_and_source_snapshots.sql"),
+    ("source document folder relations", "15_source_document_folder_relations.sql"),
     ("document projections", "20_document_projections.sql"),
     ("folder projections", "30_folder_projections.sql"),
     ("vector projection ledger", "40_vector_projection_ledger.sql"),
@@ -65,7 +66,7 @@ INDEX_SQL_FILES: tuple[SqlFile, ...] = (
 UPDATED_AT_TABLES = (
     "tenant_storage_scopes",
     "document_sources",
-    "source_document_folder_relation",
+    "source_document_folder_relations",
     "folder_sources",
     "document_index_records",
     "document_signals",
@@ -82,7 +83,7 @@ DOWNGRADE_TABLES = (
     "document_signals",
     "document_chunks",
     "document_index_records",
-    "source_document_folder_relation",
+    "source_document_folder_relations",
     "folder_sources",
     "document_sources",
     "tenant_storage_scopes",

@@ -261,6 +261,7 @@ def _build_qdrant_signal_vector_store(
                     "signal_key",
                     "source_version",
                     "content_digest",
+                    "folder_signal_input_revision",
                 ),
             ),
         )

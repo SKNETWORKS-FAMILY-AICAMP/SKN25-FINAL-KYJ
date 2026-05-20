@@ -22,6 +22,7 @@ class PostgresDocumentSignalRecord:
 class PostgresFolderSignalRecord:
     signal_id: str
     folder_id: str
+    folder_signal_input_revision: int
     signal_type: str
     signal_key: str
     text: str

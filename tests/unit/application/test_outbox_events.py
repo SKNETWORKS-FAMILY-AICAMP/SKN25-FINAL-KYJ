@@ -5,29 +5,42 @@ import unittest
 from foldmind_ai_core.adapters.inbound.messaging.message_codec import (
     document_deleted_event_from_outbox,
     document_indexed_event_from_outbox,
+    folder_indexed_event_from_outbox,
+    folder_signals_indexed_event_from_outbox,
+    folder_signals_invalidated_event_from_outbox,
 )
 from foldmind_ai_core.core.application.services.outbox_events import (
     document_deleted_event,
     document_folder_relations_indexed_event,
     document_indexed_event,
+    folder_indexed_event,
+    folder_signals_indexed_event,
+    folder_signals_invalidated_event,
 )
 from foldmind_ai_core.core.application.models.indexing import (
+    FolderSignalInvalidation,
     SourceDocumentFolderRelationSnapshot,
 )
 from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
 from foldmind_ai_core.core.domain.models.indexing.outbox import OutboxEvent
 from foldmind_ai_core.adapters.inbound.messaging.projection_events import (
     DocumentIndexedProjectionEvent,
+    FolderIndexedProjectionEvent,
+    FolderSignalsIndexedProjectionEvent,
+    FolderSignalsInvalidatedProjectionEvent,
 )
 from foldmind_ai_core.core.domain.models.profiling import (
     DocumentSignal,
     DocumentSignalType,
     DocumentProfile,
+    FolderSignalType,
     SignalEvidence,
 )
 from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
+from foldmind_ai_core.core.domain.models.reference.folders import SourceFolder
 from foldmind_ai_core.core.domain.services.profiling import (
     create_document_signal,
+    create_folder_signal,
 )
 from foldmind_ai_core.shared.validation import InvalidInputError
 
@@ -91,7 +104,7 @@ class OutboxEventCodecTests(unittest.TestCase):
             created_at=source.created_at,
             updated_at=source.updated_at,
             title=source.title,
-            signal_set_version="1",
+            signal_generation_version="1",
         )
         signals = (_summary_signal(source=source, chunk=chunk),)
 
@@ -172,7 +185,7 @@ class OutboxEventCodecTests(unittest.TestCase):
             created_at=source.created_at,
             updated_at=source.updated_at,
             title=source.title,
-            signal_set_version="1",
+            signal_generation_version="1",
         )
 
         with self.assertRaises(InvalidInputError):
@@ -187,7 +200,7 @@ class OutboxEventCodecTests(unittest.TestCase):
         snapshot = SourceDocumentFolderRelationSnapshot(
             tenant="tenant-1",
             document_id="doc-1",
-            source_version="rel-v2",
+            source_version="v2",
             folder_ids=("folder-1",),
         )
 
@@ -201,7 +214,7 @@ class OutboxEventCodecTests(unittest.TestCase):
             {
                 "tenant": "tenant-1",
                 "document_id": "doc-1",
-                "source_version": "rel-v2",
+                "source_version": "v2",
                 "folder_ids": ["folder-1"],
             },
         )
@@ -225,6 +238,72 @@ class OutboxEventCodecTests(unittest.TestCase):
         )
         decoded = document_deleted_event_from_outbox(event)
         self.assertEqual(decoded.affected_folder_ids, ("folder-1", "folder-2"))
+
+    def test_folder_events_split_source_and_signal_projection_payloads(self) -> None:
+        folder = SourceFolder(
+            tenant="tenant-1",
+            folder_id="folder-1",
+            source_version="folder-v1",
+            created_at="2026-05-01T10:00:00+09:00",
+            updated_at="2026-05-02T11:00:00+09:00",
+            name="Research",
+            path="/Research",
+        )
+        signal = create_folder_signal(
+            tenant="tenant-1",
+            folder_id="folder-1",
+            source_version="folder-v1",
+            signal_type=FolderSignalType.RESPONSIBILITY,
+            signal_key="responsibility",
+            text="Research folder responsibility.",
+            extractor_name="test",
+            extractor_version="v1",
+            folder_signal_input_revision=2,
+        )
+
+        source_event = folder_indexed_event(folder=folder)
+        indexed_event = folder_signals_indexed_event(
+            folder=folder,
+            folder_signal_input_revision=2,
+            signals=(signal,),
+        )
+        invalidated_event = folder_signals_invalidated_event(
+            FolderSignalInvalidation(
+                tenant="tenant-1",
+                folder_id="folder-1",
+                folder_signal_input_revision=2,
+            )
+        )
+
+        source_projection = folder_indexed_event_from_outbox(source_event)
+        indexed_projection = folder_signals_indexed_event_from_outbox(indexed_event)
+        invalidated_projection = folder_signals_invalidated_event_from_outbox(
+            invalidated_event
+        )
+
+        self.assertIsInstance(source_projection, FolderIndexedProjectionEvent)
+        self.assertIsInstance(indexed_projection, FolderSignalsIndexedProjectionEvent)
+        self.assertIsInstance(
+            invalidated_projection,
+            FolderSignalsInvalidatedProjectionEvent,
+        )
+        self.assertNotIn("signals", source_event.payload)
+        self.assertEqual(indexed_event.event_type, "FOLDER_SIGNALS_INDEXED")
+        self.assertEqual(
+            indexed_event.payload["signals"][0]["folder_signal_input_revision"],
+            2,
+        )
+        self.assertEqual(
+            invalidated_event.payload,
+            {
+                "tenant": "tenant-1",
+                "folder_id": "folder-1",
+                "folder_signal_input_revision": 2,
+            },
+        )
+        self.assertEqual(indexed_projection.folder_signal_input_revision, 2)
+        self.assertEqual(indexed_projection.signals[0].folder_signal_input_revision, 2)
+        self.assertEqual(invalidated_projection.folder_signal_input_revision, 2)
 
     def test_outbox_payload_schema_version_stays_at_initial_version(self) -> None:
         with self.assertRaises(InvalidInputError):

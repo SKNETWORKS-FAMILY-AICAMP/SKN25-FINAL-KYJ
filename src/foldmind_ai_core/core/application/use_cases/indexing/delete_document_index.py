@@ -6,7 +6,10 @@ from foldmind_ai_core.core.application.commands.indexing import DeleteDocumentIn
 from foldmind_ai_core.core.application.ports.outbound.indexing_unit_of_work import (
     IndexingUnitOfWork,
 )
-from foldmind_ai_core.core.application.services.outbox_events import document_deleted_event
+from foldmind_ai_core.core.application.services.outbox_events import (
+    document_deleted_event,
+    folder_signals_invalidated_event,
+)
 
 
 @dataclass(slots=True)
@@ -26,3 +29,5 @@ class DeleteDocumentIndexUseCase:
                         affected_folder_ids=deleted.affected_folder_ids,
                     )
                 )
+                for invalidation in deleted.folder_signal_invalidations:
+                    tx.append_outbox_event(folder_signals_invalidated_event(invalidation))

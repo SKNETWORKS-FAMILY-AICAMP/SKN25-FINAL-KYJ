@@ -36,6 +36,12 @@ class GraphStore(Protocol):
         self,
         *,
         relationships: FolderRelationshipProjection,
+    ) -> None:
+        ...
+
+    def replace_folder_signals(
+        self,
+        *,
         signals: FolderSignalProjection,
     ) -> None:
         ...
@@ -64,6 +70,14 @@ class GraphStore(Protocol):
         ...
 
     def delete_folder_signals(self, *, folder_id: str) -> None:
+        ...
+
+    def delete_folder_signals_before_input_revision(
+        self,
+        *,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> None:
         ...
 
     def delete_folder(self, *, folder_id: str) -> None:

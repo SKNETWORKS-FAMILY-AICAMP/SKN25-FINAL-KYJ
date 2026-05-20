@@ -14,6 +14,7 @@ from foldmind_ai_core.adapters.inbound.messaging.consumers.folder_vector_consume
     FolderVectorIndexedConsumer,
 )
 from foldmind_ai_core.adapters.inbound.messaging.consumers.folder_signal_vector_consumer import (
+    FolderSignalVectorsInvalidatedConsumer,
     FolderSignalVectorsDeletedConsumer,
     FolderSignalVectorsIndexedConsumer,
 )
@@ -23,6 +24,8 @@ from foldmind_ai_core.adapters.inbound.messaging.consumers.graph_consumer import
     DocumentGraphIndexedConsumer,
     FolderGraphDeletedConsumer,
     FolderGraphIndexedConsumer,
+    FolderSignalsGraphIndexedConsumer,
+    FolderSignalsGraphInvalidatedConsumer,
 )
 from foldmind_ai_core.adapters.inbound.messaging.consumers.document_signal_vector_consumer import (
     DocumentSignalVectorsDeletedConsumer,
@@ -49,15 +52,18 @@ from foldmind_ai_core.core.application.use_cases.projection.document_vector_proj
 from foldmind_ai_core.core.application.use_cases.projection.folder_vector_projection import (
     DeleteFolderSignalVectorsUseCase,
     DeleteFolderVectorUseCase,
+    InvalidateFolderSignalVectorsUseCase,
     ProjectFolderSignalVectorsUseCase,
     ProjectFolderVectorUseCase,
 )
 from foldmind_ai_core.core.application.use_cases.projection.graph_projection import (
     DeleteDocumentGraphUseCase,
     DeleteFolderGraphUseCase,
+    InvalidateFolderSignalsGraphUseCase,
     ProjectDocumentFolderRelationsGraphUseCase,
     ProjectDocumentGraphUseCase,
     ProjectFolderGraphUseCase,
+    ProjectFolderSignalsGraphUseCase,
 )
 from foldmind_ai_core.bootstrap.container.dependencies import (
     AICapabilities,
@@ -216,13 +222,19 @@ def _build_signal_vector_dispatcher(
                 projection_ledger=projection_ledger,
             ),
         ),
-        folder_indexed=FolderSignalVectorsIndexedConsumer(
+        folder_indexed=None,
+        folder_signals_indexed=FolderSignalVectorsIndexedConsumer(
             use_case=ProjectFolderSignalVectorsUseCase(
                 embeddings=ai.embeddings,
                 signal_vectors=signal_vectors,
                 projection_spec=projection_spec,
                 projection_ledger=projection_ledger,
                 source_freshness=source_freshness,
+            ),
+        ),
+        folder_signals_invalidated=FolderSignalVectorsInvalidatedConsumer(
+            use_case=InvalidateFolderSignalVectorsUseCase(
+                signal_vectors=signal_vectors,
             ),
         ),
         folder_deleted=FolderSignalVectorsDeletedConsumer(
@@ -300,6 +312,17 @@ def _build_graph_dispatcher(
             use_case=ProjectFolderGraphUseCase(
                 graph=graph,
                 source_freshness=source_freshness,
+            ),
+        ),
+        folder_signals_indexed=FolderSignalsGraphIndexedConsumer(
+            use_case=ProjectFolderSignalsGraphUseCase(
+                graph=graph,
+                source_freshness=source_freshness,
+            ),
+        ),
+        folder_signals_invalidated=FolderSignalsGraphInvalidatedConsumer(
+            use_case=InvalidateFolderSignalsGraphUseCase(
+                graph=graph,
             ),
         ),
         folder_deleted=FolderGraphDeletedConsumer(

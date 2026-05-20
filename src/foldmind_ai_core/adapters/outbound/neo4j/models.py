@@ -57,6 +57,7 @@ class Neo4jFolderSignalNodeRecord:
     tenant: str
     folder_id: str
     source_version: str
+    folder_signal_input_revision: int
     signal_type: str
     signal_key: str
     text: str

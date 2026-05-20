@@ -27,10 +27,22 @@ LIMIT 1
 
 _CURRENT_DOCUMENT_FOLDER_RELATION_SNAPSHOT_SQL = """
 SELECT 1
-FROM source_document_folder_relation
+FROM document_sources
 WHERE tenant_id = %s
   AND document_id = %s
   AND source_version = %s
+  AND deleted_at IS NULL
+LIMIT 1
+"""
+
+_CURRENT_FOLDER_SIGNAL_REVISION_SQL = """
+SELECT 1
+FROM folder_index_records fir
+JOIN folder_sources fs ON fs.folder_id = fir.folder_id
+WHERE fs.tenant_id = %s
+  AND fir.folder_id = %s
+  AND fir.folder_signal_input_revision = %s
+  AND fir.deleted_at IS NULL
 LIMIT 1
 """
 
@@ -84,6 +96,22 @@ class PostgresSourceFreshnessRepository:
                 conn.execute(
                     _CURRENT_DOCUMENT_FOLDER_RELATION_SNAPSHOT_SQL,
                     (tenant, document_id, source_version),
+                ).fetchone()
+                is not None
+            )
+
+    def is_current_folder_signal_input_revision(
+        self,
+        *,
+        tenant: str,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> bool:
+        with self.client.connect() as conn:
+            return (
+                conn.execute(
+                    _CURRENT_FOLDER_SIGNAL_REVISION_SQL,
+                    (tenant, folder_id, folder_signal_input_revision),
                 ).fetchone()
                 is not None
             )

@@ -27,11 +27,11 @@ LIMIT 1
 """
 
 _SELECT_CURRENT_DOCUMENT_FOLDER_IDS_SQL = """
-SELECT folder_ids
-FROM source_document_folder_relation
+SELECT folder_id
+FROM source_document_folder_relations
 WHERE tenant_id = %s
   AND document_id = %s
-LIMIT 1
+ORDER BY folder_id
 """
 
 _SELECT_CURRENT_DOCUMENT_SIGNAL_TEXT_SQL = """
@@ -110,13 +110,11 @@ class PostgresIndexedDocumentSourceRepository:
         document_id: str,
     ) -> tuple[str, ...]:
         with self.client.connect() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 _SELECT_CURRENT_DOCUMENT_FOLDER_IDS_SQL,
                 (tenant, document_id),
-            ).fetchone()
-        if row is None:
-            return ()
-        return _string_tuple(row_value(row, "folder_ids", 0), "folder_ids")
+            ).fetchall()
+        return tuple(_str(row, "folder_id", 0) for row in rows)
 
     def current_document_content_digest(
         self,
@@ -188,24 +186,6 @@ def _metadata_json_object(value: object) -> JsonObject:
     if not isinstance(value, dict):
         raise ValueError("metadata fields must contain JSON objects.")
     return cast(JsonObject, value)
-
-
-def _string_tuple(value: object, name: str) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        stripped = value.strip()
-        return (stripped,) if stripped else ()
-    if isinstance(value, list | tuple):
-        values: list[str] = []
-        for item in value:
-            if not isinstance(item, str):
-                raise ValueError(f"{name} must contain strings.")
-            stripped = item.strip()
-            if stripped:
-                values.append(stripped)
-        return tuple(values)
-    raise ValueError(f"{name} must be a string or sequence of strings.")
 
 
 def _str(row: Any, key: str, index: int) -> str:

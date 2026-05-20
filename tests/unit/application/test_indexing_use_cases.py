@@ -7,10 +7,16 @@ from foldmind_ai_core.core.application.commands.indexing import (
     DeleteDocumentIndexCommand,
     EvaluateFolderResponsibilityCommand,
     IndexDocumentCommand,
+    IndexFolderCommand,
     UpdateDocumentFolderRelationsCommand,
 )
 from foldmind_ai_core.core.application.models.indexing import (
     DeletedDocumentIdentity,
+    DocumentIndexChange,
+    FolderIndexChange,
+    FolderRelationChange,
+    FolderSignalInvalidation,
+    FolderSignalRefreshCommit,
     SourceDocumentFolderRelationSnapshot,
 )
 from foldmind_ai_core.core.domain.services.document_chunking import (
@@ -24,6 +30,7 @@ from foldmind_ai_core.core.application.use_cases.indexing.evaluate_folder_respon
     EvaluateFolderResponsibilityUseCase,
 )
 from foldmind_ai_core.core.application.use_cases.indexing.index_document import IndexDocumentUseCase
+from foldmind_ai_core.core.application.use_cases.indexing.index_folder import IndexFolderUseCase
 from foldmind_ai_core.core.application.use_cases.indexing.update_document_folder_relations import (
     UpdateDocumentFolderRelationsUseCase,
 )
@@ -62,6 +69,10 @@ class FakeIndexingTransaction:
         self.deleted_documents: list[str] = []
         self.events: list[OutboxEvent] = []
         self.operations: list[str] = []
+        self.document_index_change = DocumentIndexChange(applied=True)
+        self.folder_index_change = FolderIndexChange(applied=True)
+        self.folder_relation_change = FolderRelationChange(applied=True)
+        self.folder_signal_refresh_commit: FolderSignalRefreshCommit | None = None
 
     def upsert_document_index(
         self,
@@ -70,19 +81,22 @@ class FakeIndexingTransaction:
         chunks: tuple[DocumentChunk, ...],
         profile: DocumentProfile,
         signals: tuple[DocumentSignal, ...],
-    ) -> None:
+    ) -> DocumentIndexChange:
         self.document_indexes.append(profile)
         self.document_chunks = list(chunks)
         self.document_signals = list(signals)
         self.operations.append("upsert_document_index")
+        return self.document_index_change
 
     def replace_document_folder_relation_snapshot(
         self,
         *,
         snapshot: SourceDocumentFolderRelationSnapshot,
-    ) -> bool:
+    ) -> FolderRelationChange:
         self.operations.append("replace_document_folder_relation_snapshot")
-        return snapshot.document_id != "missing-doc"
+        if snapshot.document_id == "missing-doc":
+            return FolderRelationChange(applied=False, source_exists=False)
+        return self.folder_relation_change
 
     def mark_document_deleted(
         self,
@@ -95,17 +109,49 @@ class FakeIndexingTransaction:
             tenant="tenant-1",
             document_id=document_id,
             affected_folder_ids=("folder-1",),
+            folder_signal_invalidations=(
+                FolderSignalInvalidation(
+                    tenant="tenant-1",
+                    folder_id="folder-1",
+                    folder_signal_input_revision=1,
+                ),
+            ),
         )
 
     def upsert_folder_index(
         self,
         *,
         folder: SourceFolder,
-        signals: tuple[object, ...] = (),
-    ) -> None:
+    ) -> FolderIndexChange:
         self.folder_indexes.append(folder)
-        self.folder_signals = list(signals)
         self.operations.append("upsert_folder_index")
+        return self.folder_index_change
+
+    def current_folder_signal_input_revision(
+        self,
+        *,
+        tenant: str,
+        folder_id: str,
+    ) -> int | None:
+        self.operations.append("current_folder_signal_input_revision")
+        return 1
+
+    def replace_folder_signals(
+        self,
+        *,
+        folder: SourceFolder,
+        signals: tuple[object, ...],
+        expected_input_revision: int,
+    ) -> FolderSignalRefreshCommit:
+        self.folder_indexes.append(folder)
+        self.operations.append("replace_folder_signals")
+        commit = self.folder_signal_refresh_commit or FolderSignalRefreshCommit(
+            applied=True,
+            folder_signal_input_revision=expected_input_revision,
+        )
+        if commit.applied:
+            self.folder_signals = list(signals)
+        return commit
 
     def mark_folder_deleted(self, *, folder_id: str) -> object:
         raise AssertionError("document indexing tests should not delete folders")
@@ -140,7 +186,7 @@ class FakeDocumentProfiler:
             created_at=document.created_at,
             updated_at=document.updated_at,
             title=document.title or document.document_id,
-            signal_set_version="1",
+            signal_generation_version="1",
         )
         signal = create_document_signal(
             tenant=document.tenant,
@@ -199,7 +245,7 @@ class FakeFolderSignalExtractor:
         )
         return FolderSignalExtraction(
             signals=(signal,),
-            signal_set_version="folder-signals-v1",
+            signal_generation_version="folder-signals-v1",
             model="folder-model",
         )
 
@@ -247,6 +293,19 @@ def make_folder() -> SourceFolder:
     )
 
 
+def make_index_folder_command() -> IndexFolderCommand:
+    return IndexFolderCommand(
+        tenant="tenant-1",
+        folder_id="folder-1",
+        source_version="folder-v1",
+        created_at="2026-05-01T10:00:00+09:00",
+        updated_at="2026-05-02T11:00:00+09:00",
+        name="Research",
+        path="/Research",
+        description="Research notes",
+    )
+
+
 def make_index_document_use_case(
     *,
     uow: FakeIndexingUnitOfWork | None = None,
@@ -279,13 +338,16 @@ class IndexingUseCaseTests(unittest.TestCase):
 
         self.assertEqual(result.indexed_chunk_count, 0)
         self.assertEqual(uow.tx.deleted_documents, ["doc-1"])
-        self.assertEqual([event.event_type for event in uow.tx.events], ["DOCUMENT_DELETED"])
+        self.assertEqual(
+            [event.event_type for event in uow.tx.events],
+            ["DOCUMENT_DELETED", "FOLDER_SIGNALS_INVALIDATED"],
+        )
         self.assertEqual(uow.tx.events[0].source_id, "doc-1")
         self.assertEqual(uow.tx.events[0].tenant, "tenant-1")
         self.assertEqual(uow.tx.events[0].payload["affected_folder_ids"], ["folder-1"])
         self.assertEqual(
             uow.tx.operations,
-            ["mark_document_deleted", "append_outbox"],
+            ["mark_document_deleted", "append_outbox", "append_outbox"],
         )
 
     def test_explicit_document_delete_deletes_profile_and_publishes_outbox_event(self) -> None:
@@ -300,7 +362,10 @@ class IndexingUseCaseTests(unittest.TestCase):
         )
 
         self.assertEqual(uow.tx.deleted_documents, ["doc-1"])
-        self.assertEqual([event.event_type for event in uow.tx.events], ["DOCUMENT_DELETED"])
+        self.assertEqual(
+            [event.event_type for event in uow.tx.events],
+            ["DOCUMENT_DELETED", "FOLDER_SIGNALS_INVALIDATED"],
+        )
         self.assertEqual(uow.tx.events[0].payload["affected_folder_ids"], ["folder-1"])
         self.assertEqual(
             uow.tx.events[0].partition_key,
@@ -324,6 +389,115 @@ class IndexingUseCaseTests(unittest.TestCase):
         self.assertEqual(
             uow.tx.operations,
             ["upsert_document_index", "append_outbox"],
+        )
+
+    def test_stale_document_indexing_does_not_publish_outbox_or_invalidate_folders(
+        self,
+    ) -> None:
+        uow = FakeIndexingUnitOfWork()
+        uow.tx.document_index_change = DocumentIndexChange(applied=False)
+
+        result = make_index_document_use_case(
+            uow=uow,
+        ).execute(make_index_document_command())
+
+        self.assertEqual(result.indexed_chunk_count, 0)
+        self.assertEqual([event.event_type for event in uow.tx.events], [])
+        self.assertEqual(uow.tx.operations, ["upsert_document_index"])
+
+    def test_relation_change_invalidates_previous_and_current_folders(self) -> None:
+        uow = FakeIndexingUnitOfWork()
+        uow.tx.folder_relation_change = FolderRelationChange(
+            applied=True,
+            previous_folder_ids=("old-folder",),
+            current_folder_ids=("new-folder",),
+            folder_signal_invalidations=(
+                FolderSignalInvalidation(
+                    tenant="tenant-1",
+                    folder_id="old-folder",
+                    folder_signal_input_revision=3,
+                ),
+                FolderSignalInvalidation(
+                    tenant="tenant-1",
+                    folder_id="new-folder",
+                    folder_signal_input_revision=1,
+                ),
+            ),
+        )
+
+        UpdateDocumentFolderRelationsUseCase(indexing_uow=uow).execute(
+            UpdateDocumentFolderRelationsCommand(
+                tenant="tenant-1",
+                document_id="doc-1",
+                source_version="v2",
+                folder_ids=("new-folder",),
+            )
+        )
+
+        self.assertEqual(
+            [event.event_type for event in uow.tx.events],
+            [
+                "DOCUMENT_FOLDER_RELATIONS_INDEXED",
+                "FOLDER_SIGNALS_INVALIDATED",
+                "FOLDER_SIGNALS_INVALIDATED",
+            ],
+        )
+        self.assertEqual(
+            [event.source_id for event in uow.tx.events[1:]],
+            ["old-folder", "new-folder"],
+        )
+
+    def test_stale_relation_change_does_not_publish_or_invalidate_folders(self) -> None:
+        uow = FakeIndexingUnitOfWork()
+        uow.tx.folder_relation_change = FolderRelationChange(
+            applied=False,
+            previous_folder_ids=("old-folder",),
+            current_folder_ids=("old-folder",),
+        )
+
+        UpdateDocumentFolderRelationsUseCase(indexing_uow=uow).execute(
+            UpdateDocumentFolderRelationsCommand(
+                tenant="tenant-1",
+                document_id="doc-1",
+                source_version="v1",
+                folder_ids=("new-folder",),
+            )
+        )
+
+        self.assertEqual(uow.tx.events, [])
+        self.assertEqual(
+            uow.tx.operations,
+            ["replace_document_folder_relation_snapshot"],
+        )
+
+    def test_folder_source_indexing_splits_source_and_signal_invalidation_events(
+        self,
+    ) -> None:
+        uow = FakeIndexingUnitOfWork()
+        uow.tx.folder_index_change = FolderIndexChange(
+            applied=True,
+            folder_signal_invalidation=FolderSignalInvalidation(
+                tenant="tenant-1",
+                folder_id="folder-1",
+                folder_signal_input_revision=2,
+            ),
+        )
+
+        result = IndexFolderUseCase(indexing_uow=uow).execute(make_index_folder_command())
+
+        self.assertEqual(result.folder_id, "folder-1")
+        self.assertEqual(
+            [event.event_type for event in uow.tx.events],
+            ["FOLDER_INDEXED", "FOLDER_SIGNALS_INVALIDATED"],
+        )
+        self.assertNotIn("signals", uow.tx.events[0].payload)
+        self.assertEqual(
+            uow.tx.events[1].payload,
+            {
+                "tenant": "tenant-1",
+                "folder_id": "folder-1",
+                "folder_signal_input_revision": 2,
+            },
         )
 
     def test_document_chunker_validates_config_and_preserves_offsets(self) -> None:
@@ -425,14 +599,40 @@ class IndexingUseCaseTests(unittest.TestCase):
         )
 
         self.assertEqual(result.signal_count, 1)
-        self.assertEqual(uow.tx.folder_indexes[0].folder_id, "folder-1")
-        self.assertEqual(uow.tx.folder_signals[0].metadata["signal_set_version"], "folder-signals-v1")
+        self.assertEqual(uow.tx.folder_signals[0].metadata["signal_generation_version"], "folder-signals-v1")
         self.assertEqual(uow.tx.folder_signals[0].metadata["model"], "folder-model")
-        self.assertEqual([event.event_type for event in uow.tx.events], ["FOLDER_INDEXED"])
+        self.assertEqual(uow.tx.folder_signals[0].folder_signal_input_revision, 1)
+        self.assertEqual([event.event_type for event in uow.tx.events], ["FOLDER_SIGNALS_INDEXED"])
         self.assertEqual(uow.tx.events[0].payload["signals"][0]["text"], "Folder responsibility matches member documents.")
         self.assertEqual(
             uow.tx.operations,
-            ["upsert_folder_index", "append_outbox"],
+            ["current_folder_signal_input_revision", "replace_folder_signals", "append_outbox"],
+        )
+
+    def test_folder_responsibility_evaluation_discards_raced_revision(self) -> None:
+        uow = FakeIndexingUnitOfWork()
+        uow.tx.folder_signal_refresh_commit = FolderSignalRefreshCommit(
+            applied=False,
+            folder_signal_input_revision=1,
+        )
+
+        result = EvaluateFolderResponsibilityUseCase(
+            source_repository=FakeFolderResponsibilitySourceRepository(make_folder()),
+            signal_extractor=FakeFolderSignalExtractor(),
+            indexing_uow=uow,
+        ).execute(
+            EvaluateFolderResponsibilityCommand(
+                tenant="tenant-1",
+                folder_id="folder-1",
+            )
+        )
+
+        self.assertEqual(result.signal_count, 0)
+        self.assertEqual(uow.tx.folder_signals, [])
+        self.assertEqual(uow.tx.events, [])
+        self.assertEqual(
+            uow.tx.operations,
+            ["current_folder_signal_input_revision", "replace_folder_signals"],
         )
 
     def test_folder_responsibility_evaluation_requires_existing_folder(self) -> None:

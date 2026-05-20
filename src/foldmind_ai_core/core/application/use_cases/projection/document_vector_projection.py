@@ -123,12 +123,6 @@ class DeleteDocumentSignalVectorsUseCase:
             self.projection_ledger.delete_signal_vector_records(
                 document_id=command.document_id,
             )
-        for folder_id in command.affected_folder_ids:
-            self.signal_vectors.delete_folder_signals(folder_id=folder_id)
-            if self.projection_ledger is not None:
-                self.projection_ledger.delete_folder_signal_vector_records(
-                    folder_id=folder_id,
-                )
 
 
 def _is_current_document_source(

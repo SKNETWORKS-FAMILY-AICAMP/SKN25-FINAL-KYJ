@@ -5,10 +5,16 @@ CREATE TABLE folder_index_records (
     folder_id text PRIMARY KEY
         REFERENCES folder_sources (folder_id)
         ON DELETE CASCADE,
-    signal_set_version text NOT NULL DEFAULT '1' CHECK (
-        length(btrim(signal_set_version)) > 0
+    signal_generation_version text NOT NULL DEFAULT '1' CHECK (
+        length(btrim(signal_generation_version)) > 0
     ),
     model text NOT NULL DEFAULT '',
+    folder_signal_input_revision bigint NOT NULL DEFAULT 0 CHECK (
+        folder_signal_input_revision >= 0
+    ),
+    folder_signal_refresh_status text NOT NULL DEFAULT 'empty' CHECK (
+        folder_signal_refresh_status IN ('empty', 'pending', 'ready', 'failed')
+    ),
     deleted_at timestamptz,
     purge_after timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -28,6 +34,9 @@ CREATE TABLE folder_signals (
     folder_id text NOT NULL
         REFERENCES folder_sources (folder_id)
         ON DELETE CASCADE,
+    folder_signal_input_revision bigint NOT NULL CHECK (
+        folder_signal_input_revision >= 0
+    ),
     signal_type text NOT NULL CHECK (
         signal_type IN (
             'summary',

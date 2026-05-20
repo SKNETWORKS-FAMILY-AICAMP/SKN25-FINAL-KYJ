@@ -8,6 +8,11 @@ from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
 from foldmind_ai_core.core.application.models.indexing import (
     DeletedDocumentIdentity,
     DeletedFolderIdentity,
+    DocumentIndexChange,
+    FolderIndexChange,
+    FolderRelationChange,
+    FolderSignalInvalidation,
+    FolderSignalRefreshCommit,
     SourceDocumentFolderRelationSnapshot,
 )
 from foldmind_ai_core.core.domain.models.profiling import (
@@ -27,7 +32,7 @@ class IndexingTransaction(Protocol):
         chunks: tuple[DocumentChunk, ...],
         profile: DocumentProfile,
         signals: tuple[DocumentSignal, ...],
-    ) -> None:
+    ) -> DocumentIndexChange:
         ...
 
     def mark_document_deleted(
@@ -41,15 +46,31 @@ class IndexingTransaction(Protocol):
         self,
         *,
         snapshot: SourceDocumentFolderRelationSnapshot,
-    ) -> bool:
+    ) -> FolderRelationChange:
         ...
 
     def upsert_folder_index(
         self,
         *,
         folder: SourceFolder,
-        signals: tuple[FolderSignal, ...] = (),
-    ) -> None:
+    ) -> FolderIndexChange:
+        ...
+
+    def current_folder_signal_input_revision(
+        self,
+        *,
+        tenant: str,
+        folder_id: str,
+    ) -> int | None:
+        ...
+
+    def replace_folder_signals(
+        self,
+        *,
+        folder: SourceFolder,
+        signals: tuple[FolderSignal, ...],
+        expected_input_revision: int,
+    ) -> FolderSignalRefreshCommit:
         ...
 
     def mark_folder_deleted(

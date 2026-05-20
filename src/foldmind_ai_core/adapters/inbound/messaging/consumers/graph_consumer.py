@@ -5,17 +5,21 @@ from dataclasses import dataclass
 from foldmind_ai_core.core.application.ports.inbound.projection import (
     DeleteDocumentGraphInboundPort,
     DeleteFolderGraphInboundPort,
+    InvalidateFolderSignalsGraphInboundPort,
     ProjectDocumentFolderRelationsGraphInboundPort,
     ProjectDocumentGraphInboundPort,
     ProjectFolderGraphInboundPort,
+    ProjectFolderSignalsGraphInboundPort,
 )
 from foldmind_ai_core.core.domain.models.indexing.outbox import OutboxEvent
 from foldmind_ai_core.adapters.inbound.messaging.mappers.outbox import (
     delete_document_projection_command,
     delete_folder_projection_command,
+    invalidate_folder_signals_command,
     project_document_folder_relations_command,
     project_document_command,
     project_folder_command,
+    project_folder_signals_command,
 )
 
 
@@ -49,6 +53,22 @@ class FolderGraphIndexedConsumer:
 
     def consume_outbox_event(self, event: OutboxEvent) -> None:
         self.use_case.execute(project_folder_command(event))
+
+
+@dataclass(slots=True)
+class FolderSignalsGraphIndexedConsumer:
+    use_case: ProjectFolderSignalsGraphInboundPort
+
+    def consume_outbox_event(self, event: OutboxEvent) -> None:
+        self.use_case.execute(project_folder_signals_command(event))
+
+
+@dataclass(slots=True)
+class FolderSignalsGraphInvalidatedConsumer:
+    use_case: InvalidateFolderSignalsGraphInboundPort
+
+    def consume_outbox_event(self, event: OutboxEvent) -> None:
+        self.use_case.execute(invalidate_folder_signals_command(event))
 
 
 @dataclass(slots=True)

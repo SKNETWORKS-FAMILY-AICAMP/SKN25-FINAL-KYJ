@@ -10,7 +10,10 @@ from foldmind_ai_core.core.application.ports.outbound.indexing_unit_of_work impo
     IndexingUnitOfWork,
 )
 from foldmind_ai_core.core.application.results.indexing import IndexFolderResult
-from foldmind_ai_core.core.application.services.outbox_events import folder_indexed_event
+from foldmind_ai_core.core.application.services.outbox_events import (
+    folder_indexed_event,
+    folder_signals_invalidated_event,
+)
 
 
 @dataclass(slots=True)
@@ -20,8 +23,15 @@ class IndexFolderUseCase:
     def execute(self, command: IndexFolderCommand) -> IndexFolderResult:
         folder = source_folder_from_index_command(command)
         with self.indexing_uow.transaction() as tx:
-            tx.upsert_folder_index(folder=folder)
-            tx.append_outbox_event(folder_indexed_event(folder=folder))
+            change = tx.upsert_folder_index(folder=folder)
+            if change.applied:
+                tx.append_outbox_event(folder_indexed_event(folder=folder))
+                if change.folder_signal_invalidation is not None:
+                    tx.append_outbox_event(
+                        folder_signals_invalidated_event(
+                            change.folder_signal_invalidation
+                        )
+                    )
         return IndexFolderResult(
             tenant=folder.tenant,
             folder_id=folder.folder_id,

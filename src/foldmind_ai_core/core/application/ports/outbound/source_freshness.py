@@ -31,3 +31,12 @@ class SourceFreshnessChecker(Protocol):
         source_version: str,
     ) -> bool:
         raise NotImplementedError
+
+    def is_current_folder_signal_input_revision(
+        self,
+        *,
+        tenant: str,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> bool:
+        raise NotImplementedError

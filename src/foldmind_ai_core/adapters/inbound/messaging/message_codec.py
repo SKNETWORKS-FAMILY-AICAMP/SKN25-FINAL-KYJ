@@ -17,6 +17,8 @@ from foldmind_ai_core.adapters.inbound.messaging.projection_events import (
     DocumentIndexedProjectionEvent,
     FolderDeletedProjectionEvent,
     FolderIndexedProjectionEvent,
+    FolderSignalsIndexedProjectionEvent,
+    FolderSignalsInvalidatedProjectionEvent,
 )
 from foldmind_ai_core.core.application.models.projection_inputs import (
     ProjectionDocument,
@@ -113,11 +115,45 @@ def folder_indexed_event_from_outbox(
         folder=_source_folder_from_payload(
             _nested_json_object(event.payload, "source_folder")
         ),
+    )
+    _validate_tenant(event, projection_event.folder.tenant)
+    _validate_source_id(event, projection_event.folder.folder_id)
+    return projection_event
+
+
+def folder_signals_indexed_event_from_outbox(
+    event: OutboxEvent,
+) -> FolderSignalsIndexedProjectionEvent:
+    _require_event_type(event, OutboxEventType.FOLDER_SIGNALS_INDEXED)
+    _require_source_kind(event, OutboxSourceKind.FOLDER)
+    projection_event = FolderSignalsIndexedProjectionEvent(
+        folder=_source_folder_from_payload(
+            _nested_json_object(event.payload, "source_folder")
+        ),
+        folder_signal_input_revision=_required_int(
+            event.payload,
+            "folder_signal_input_revision",
+        ),
         signals=_folder_signals_from_payload(event.payload.get("signals")),
     )
     _validate_tenant(event, projection_event.folder.tenant)
     _validate_source_id(event, projection_event.folder.folder_id)
     return projection_event
+
+
+def folder_signals_invalidated_event_from_outbox(
+    event: OutboxEvent,
+) -> FolderSignalsInvalidatedProjectionEvent:
+    _require_event_type(event, OutboxEventType.FOLDER_SIGNALS_INVALIDATED)
+    _require_source_kind(event, OutboxSourceKind.FOLDER)
+    tenant = _required_text(event.payload, "tenant")
+    folder_id = _required_text(event.payload, "folder_id")
+    _validate_tenant(event, tenant)
+    _validate_source_id(event, folder_id)
+    return FolderSignalsInvalidatedProjectionEvent(
+        folder_id=folder_id,
+        folder_signal_input_revision=_required_int(event.payload, "folder_signal_input_revision"),
+    )
 
 
 def folder_deleted_event_from_outbox(
@@ -337,7 +373,7 @@ def _document_profile_from_payload(payload: JsonObject) -> ProjectionDocumentPro
         created_at=_required_text(payload, "created_at"),
         updated_at=_required_text(payload, "updated_at"),
         title=_required_content_text(payload, "title"),
-        signal_set_version=_required_text(payload, "signal_set_version"),
+        signal_generation_version=_required_text(payload, "signal_generation_version"),
         model=_optional_text(payload.get("model")) or "",
         metadata=_metadata(payload, "metadata"),
     )
@@ -384,6 +420,7 @@ def _folder_signal_from_payload(payload: JsonObject) -> ProjectionFolderSignal:
         tenant=_required_text(payload, "tenant"),
         folder_id=_required_text(payload, "folder_id"),
         source_version=_required_text(payload, "source_version"),
+        folder_signal_input_revision=_required_int(payload, "folder_signal_input_revision"),
         signal_type=_required_text(payload, "signal_type"),
         signal_key=_required_text(payload, "signal_key"),
         text=_required_content_text(payload, "text"),

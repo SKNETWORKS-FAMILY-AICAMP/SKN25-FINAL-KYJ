@@ -48,6 +48,7 @@ class QdrantSignalPayload:
     document_type: str | None
     document_id: str | None
     folder_id: str | None
+    folder_signal_input_revision: int | None
     signal_type: str
     signal_key: str
     text: str

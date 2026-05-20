@@ -18,6 +18,8 @@ class OutboxEventDispatcher:
     folder_indexed: OutboxEventConsumer | None
     folder_deleted: OutboxEventConsumer | None
     document_folder_relations_indexed: OutboxEventConsumer | None = None
+    folder_signals_indexed: OutboxEventConsumer | None = None
+    folder_signals_invalidated: OutboxEventConsumer | None = None
 
     def consume_outbox_event(self, event: OutboxEvent) -> None:
         event_type = OutboxEventType(event.event_type)
@@ -30,6 +32,10 @@ class OutboxEventDispatcher:
                 consumer = self.document_deleted
             case OutboxEventType.FOLDER_INDEXED:
                 consumer = self.folder_indexed
+            case OutboxEventType.FOLDER_SIGNALS_INDEXED:
+                consumer = self.folder_signals_indexed
+            case OutboxEventType.FOLDER_SIGNALS_INVALIDATED:
+                consumer = self.folder_signals_invalidated
             case OutboxEventType.FOLDER_DELETED:
                 consumer = self.folder_deleted
         if consumer is not None:

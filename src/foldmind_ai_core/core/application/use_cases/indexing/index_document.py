@@ -15,6 +15,7 @@ from foldmind_ai_core.core.domain.services.document_chunking import DocumentChun
 from foldmind_ai_core.core.application.services.outbox_events import (
     document_deleted_event,
     document_indexed_event,
+    folder_signals_invalidated_event,
 )
 
 
@@ -43,6 +44,11 @@ class IndexDocumentUseCase:
                         affected_folder_ids=affected_folder_ids,
                     )
                 )
+                if deleted is not None:
+                    for invalidation in deleted.folder_signal_invalidations:
+                        tx.append_outbox_event(
+                            folder_signals_invalidated_event(invalidation)
+                        )
             return IndexDocumentResult(indexed_chunk_count=0)
 
         extraction = self.signal_extractor.profile(document, chunks)
@@ -53,11 +59,15 @@ class IndexDocumentUseCase:
             signals=extraction.signals,
         )
         with self.indexing_uow.transaction() as tx:
-            tx.upsert_document_index(
+            change = tx.upsert_document_index(
                 document=document,
                 chunks=tuple(chunks),
                 profile=extraction.profile,
                 signals=extraction.signals,
             )
-            tx.append_outbox_event(event)
-        return IndexDocumentResult(indexed_chunk_count=len(chunks))
+            if change.applied:
+                tx.append_outbox_event(event)
+                for invalidation in change.folder_signal_invalidations:
+                    tx.append_outbox_event(folder_signals_invalidated_event(invalidation))
+        indexed_chunk_count = len(chunks) if change.applied else 0
+        return IndexDocumentResult(indexed_chunk_count=indexed_chunk_count)

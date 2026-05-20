@@ -5,9 +5,11 @@ from dataclasses import dataclass
 from foldmind_ai_core.core.application.commands.projection import (
     DeleteDocumentProjectionCommand,
     DeleteFolderProjectionCommand,
+    InvalidateFolderSignalsCommand,
     ProjectDocumentFolderRelationsCommand,
     ProjectDocumentCommand,
     ProjectFolderCommand,
+    ProjectFolderSignalsCommand,
 )
 from foldmind_ai_core.core.application.ports.outbound.graph_store import GraphStore
 from foldmind_ai_core.core.application.ports.outbound.source_freshness import (
@@ -69,8 +71,6 @@ class DeleteDocumentGraphUseCase:
         self.graph.delete_document(
             document_id=command.document_id,
         )
-        for folder_id in command.affected_folder_ids:
-            self.graph.delete_folder_signals(folder_id=folder_id)
 
 
 @dataclass(slots=True)
@@ -82,13 +82,33 @@ class ProjectFolderGraphUseCase:
         if not _is_current_folder_source(self.source_freshness, command):
             return
         relationships = folder_relationship_projection_from_source_folder(command.folder)
+        self.graph.replace_folder_projection(relationships=relationships)
+
+
+@dataclass(slots=True)
+class ProjectFolderSignalsGraphUseCase:
+    graph: GraphStore
+    source_freshness: SourceFreshnessChecker | None = None
+
+    def execute(self, command: ProjectFolderSignalsCommand) -> None:
+        if not _is_current_folder_signal_input_revision(self.source_freshness, command):
+            return
         signals = folder_signal_graph_projection_from_folder(
             command.folder,
             command.signals,
+            folder_signal_input_revision=command.folder_signal_input_revision,
         )
-        self.graph.replace_folder_projection(
-            relationships=relationships,
-            signals=signals,
+        self.graph.replace_folder_signals(signals=signals)
+
+
+@dataclass(slots=True)
+class InvalidateFolderSignalsGraphUseCase:
+    graph: GraphStore
+
+    def execute(self, command: InvalidateFolderSignalsCommand) -> None:
+        self.graph.delete_folder_signals_before_input_revision(
+            folder_id=command.folder_id,
+            folder_signal_input_revision=command.folder_signal_input_revision,
         )
 
 
@@ -140,4 +160,18 @@ def _is_current_folder_source(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
         source_version=folder.source_version,
+    )
+
+
+def _is_current_folder_signal_input_revision(
+    source_freshness: SourceFreshnessChecker | None,
+    command: ProjectFolderSignalsCommand,
+) -> bool:
+    if source_freshness is None:
+        return True
+    folder = command.folder
+    return source_freshness.is_current_folder_signal_input_revision(
+        tenant=folder.tenant,
+        folder_id=folder.folder_id,
+        folder_signal_input_revision=command.folder_signal_input_revision,
     )

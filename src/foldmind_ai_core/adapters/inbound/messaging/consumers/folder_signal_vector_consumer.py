@@ -4,10 +4,12 @@ from dataclasses import dataclass
 
 from foldmind_ai_core.adapters.inbound.messaging.mappers.outbox import (
     delete_folder_projection_command,
-    project_folder_command,
+    invalidate_folder_signals_command,
+    project_folder_signals_command,
 )
 from foldmind_ai_core.core.application.ports.inbound.projection import (
     DeleteFolderSignalVectorsInboundPort,
+    InvalidateFolderSignalVectorsInboundPort,
     ProjectFolderSignalVectorsInboundPort,
 )
 from foldmind_ai_core.core.domain.models.indexing.outbox import OutboxEvent
@@ -18,7 +20,15 @@ class FolderSignalVectorsIndexedConsumer:
     use_case: ProjectFolderSignalVectorsInboundPort
 
     def consume_outbox_event(self, event: OutboxEvent) -> None:
-        self.use_case.execute(project_folder_command(event))
+        self.use_case.execute(project_folder_signals_command(event))
+
+
+@dataclass(slots=True)
+class FolderSignalVectorsInvalidatedConsumer:
+    use_case: InvalidateFolderSignalVectorsInboundPort
+
+    def consume_outbox_event(self, event: OutboxEvent) -> None:
+        self.use_case.execute(invalidate_folder_signals_command(event))
 
 
 @dataclass(slots=True)

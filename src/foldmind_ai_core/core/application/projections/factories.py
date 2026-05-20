@@ -96,6 +96,7 @@ def folder_signal_vector_projection_from_signal(
         signal_id=signal.signal_id,
         tenant=signal.tenant,
         folder_id=signal.folder_id,
+        folder_signal_input_revision=signal.folder_signal_input_revision,
         signal_type=signal.signal_type,
         signal_key=signal.signal_key,
         source_version=signal.source_version,
@@ -114,24 +115,12 @@ def folder_signal_vector_projection_from_signal(
 
 def folder_vector_projection_from_source(
     folder: ProjectionFolder,
-    signals: tuple[ProjectionFolderSignal, ...] = (),
     *,
     embedding_model: str,
     embedding_version: str,
     index_schema_version: str,
 ) -> FolderVectorProjection:
-    embedding_input = _projection_text(
-        (
-            folder.name,
-            folder.path or "",
-            folder.description,
-            *(
-                signal.text
-                for signal in signals
-                if signal.signal_type in ("summary", "responsibility")
-            ),
-        )
-    )
+    embedding_input = _projection_text((folder.name, folder.path or "", folder.description))
     return FolderVectorProjection(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
@@ -202,7 +191,7 @@ def document_signal_graph_projection_from_profile(
         created_at=profile.created_at,
         updated_at=profile.updated_at,
         title=profile.title,
-        signal_set_version=profile.signal_set_version,
+        signal_generation_version=profile.signal_generation_version,
         signals=tuple(signal_graph_projection_from_signal(signal) for signal in signals),
         metadata={
             "model": profile.model,
@@ -213,17 +202,21 @@ def document_signal_graph_projection_from_profile(
 def folder_signal_graph_projection_from_folder(
     folder: ProjectionFolder,
     signals: tuple[ProjectionFolderSignal, ...],
+    *,
+    folder_signal_input_revision: int,
 ) -> FolderSignalProjection:
     return FolderSignalProjection(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
         source_version=folder.source_version,
+        folder_signal_input_revision=folder_signal_input_revision,
         signals=tuple(
             FolderSignalNodeProjection(
                 signal_id=signal.signal_id,
                 tenant=signal.tenant,
                 folder_id=signal.folder_id,
                 source_version=signal.source_version,
+                folder_signal_input_revision=signal.folder_signal_input_revision,
                 signal_type=signal.signal_type,
                 signal_key=signal.signal_key,
                 text=signal.text,

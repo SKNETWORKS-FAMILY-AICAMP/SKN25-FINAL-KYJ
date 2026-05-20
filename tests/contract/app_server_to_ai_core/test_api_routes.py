@@ -347,7 +347,7 @@ class ApiRouteTests(unittest.TestCase):
                     "title": "Meeting notes",
                     "body": "Prepare next meeting",
                     "folder_relation_snapshot": {
-                        "source_version": "rel-v1",
+                        "source_version": "v1",
                         "folder_ids": [FOLDER_ID],
                     },
                 }
@@ -439,7 +439,7 @@ class ApiRouteTests(unittest.TestCase):
             f"/indexing/documents/{DOCUMENT_ID}/folder-relations",
             json={
                 "tenant": " tenant-1 ",
-                "source_version": " rel-v2 ",
+                "source_version": " v2 ",
                 "folder_ids": [f" {FOLDER_ID} "],
             },
         )
@@ -454,7 +454,7 @@ class ApiRouteTests(unittest.TestCase):
         )
         self.assertEqual(
             update_document_folder_relations.command.source_version,
-            "rel-v2",
+            "v2",
         )
         self.assertEqual(
             update_document_folder_relations.command.folder_ids,

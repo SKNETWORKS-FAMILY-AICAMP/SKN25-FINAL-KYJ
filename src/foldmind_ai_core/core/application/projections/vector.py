@@ -85,6 +85,7 @@ class FolderSignalVectorProjection:
     embedding_version: str
     index_schema_version: str
     metadata: Metadata = field(default_factory=dict)
+    folder_signal_input_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)

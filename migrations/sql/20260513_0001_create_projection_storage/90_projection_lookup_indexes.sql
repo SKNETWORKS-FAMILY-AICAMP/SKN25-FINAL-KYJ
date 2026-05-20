@@ -14,9 +14,9 @@ CREATE INDEX document_sources_purge_idx
     ON document_sources (purge_after)
     WHERE deleted_at IS NOT NULL;
 
--- source_document_folder_relation_tenant_updated_idx
-CREATE INDEX source_document_folder_relation_tenant_updated_idx
-    ON source_document_folder_relation (tenant_id, updated_at DESC);
+-- source_document_folder_relations_folder_idx
+CREATE INDEX source_document_folder_relations_folder_idx
+    ON source_document_folder_relations (tenant_id, folder_id);
 
 -- folder_sources_tenant_updated_idx
 CREATE INDEX folder_sources_tenant_updated_idx
@@ -38,6 +38,10 @@ CREATE INDEX document_signals_type_key_idx
 -- folder_signals_folder_type_idx
 CREATE INDEX folder_signals_folder_type_idx
     ON folder_signals (folder_id, signal_type);
+
+-- folder_signals_folder_input_revision_idx
+CREATE INDEX folder_signals_folder_input_revision_idx
+    ON folder_signals (folder_id, folder_signal_input_revision);
 
 -- folder_signals_related_document_idx
 CREATE INDEX folder_signals_related_document_idx

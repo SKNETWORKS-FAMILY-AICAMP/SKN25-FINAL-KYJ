@@ -4,7 +4,9 @@ from dataclasses import dataclass
 
 from foldmind_ai_core.core.application.commands.projection import (
     DeleteFolderProjectionCommand,
+    InvalidateFolderSignalsCommand,
     ProjectFolderCommand,
+    ProjectFolderSignalsCommand,
 )
 from foldmind_ai_core.core.application.ports.outbound.embedding import EmbeddingProvider
 from foldmind_ai_core.core.application.ports.outbound.projection_ledger import (
@@ -38,7 +40,6 @@ class ProjectFolderVectorUseCase:
             return
         projection = folder_vector_projection_from_source(
             command.folder,
-            signals=command.signals,
             embedding_model=self.projection_spec.embedding_model,
             embedding_version=self.projection_spec.embedding_version,
             index_schema_version=self.projection_spec.index_schema_version,
@@ -75,8 +76,8 @@ class ProjectFolderSignalVectorsUseCase:
     projection_ledger: ProjectionLedger | None = None
     source_freshness: SourceFreshnessChecker | None = None
 
-    def execute(self, command: ProjectFolderCommand) -> None:
-        if not _is_current_folder_source(self.source_freshness, command):
+    def execute(self, command: ProjectFolderSignalsCommand) -> None:
+        if not _is_current_folder_signal_input_revision(self.source_freshness, command):
             return
         projections = tuple(
             folder_signal_vector_projection_from_signal(
@@ -108,6 +109,17 @@ class ProjectFolderSignalVectorsUseCase:
 
 
 @dataclass(slots=True)
+class InvalidateFolderSignalVectorsUseCase:
+    signal_vectors: SignalVectorStore
+
+    def execute(self, command: InvalidateFolderSignalsCommand) -> None:
+        self.signal_vectors.delete_folder_signals_before_input_revision(
+            folder_id=command.folder_id,
+            folder_signal_input_revision=command.folder_signal_input_revision,
+        )
+
+
+@dataclass(slots=True)
 class DeleteFolderSignalVectorsUseCase:
     signal_vectors: SignalVectorStore
     projection_ledger: ProjectionLedger | None = None
@@ -131,4 +143,18 @@ def _is_current_folder_source(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
         source_version=folder.source_version,
+    )
+
+
+def _is_current_folder_signal_input_revision(
+    source_freshness: SourceFreshnessChecker | None,
+    command: ProjectFolderSignalsCommand,
+) -> bool:
+    if source_freshness is None:
+        return True
+    folder = command.folder
+    return source_freshness.is_current_folder_signal_input_revision(
+        tenant=folder.tenant,
+        folder_id=folder.folder_id,
+        folder_signal_input_revision=command.folder_signal_input_revision,
     )

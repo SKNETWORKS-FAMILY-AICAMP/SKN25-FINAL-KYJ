@@ -56,25 +56,6 @@ CREATE TABLE document_sources (
     )
 );
 
--- source_document_folder_relation
-CREATE TABLE source_document_folder_relation (
-    tenant_id text NOT NULL
-        REFERENCES tenant_storage_scopes (tenant_id)
-        ON DELETE CASCADE,
-    document_id text NOT NULL,
-    source_version text NOT NULL CHECK (length(btrim(source_version)) > 0),
-    folder_ids text[] NOT NULL DEFAULT '{}'::text[],
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant_id, document_id),
-    FOREIGN KEY (tenant_id, document_id)
-        REFERENCES document_sources (tenant_id, document_id)
-        ON DELETE CASCADE,
-    CHECK (
-        array_position(folder_ids, NULL) IS NULL
-    )
-);
-
 -- folder_sources
 CREATE TABLE folder_sources (
     folder_id text PRIMARY KEY CHECK (length(btrim(folder_id)) > 0),

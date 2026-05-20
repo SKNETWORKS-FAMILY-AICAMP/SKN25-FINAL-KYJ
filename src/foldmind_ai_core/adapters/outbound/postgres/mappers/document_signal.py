@@ -34,6 +34,7 @@ def folder_signal_record_from_domain(
     return PostgresFolderSignalRecord(
         signal_id=signal.signal_id,
         folder_id=signal.folder_id,
+        folder_signal_input_revision=signal.folder_signal_input_revision,
         signal_type=str(signal.signal_type),
         signal_key=signal.signal_key,
         text=signal.text,

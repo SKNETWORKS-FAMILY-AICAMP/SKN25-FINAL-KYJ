@@ -193,7 +193,7 @@ class PostgresAdapterTests(unittest.TestCase):
         )
 
         self.assertIn("title", _all_sql(connection))
-        self.assertIn("signal_set_version", _all_sql(connection))
+        self.assertIn("signal_generation_version", _all_sql(connection))
         self.assertIn("document_sources", _all_sql(connection))
         self.assertIn("ON CONFLICT (document_id)", _all_sql(connection))
         self.assertIn("source_created_at", _all_sql(connection))
@@ -203,7 +203,7 @@ class PostgresAdapterTests(unittest.TestCase):
             "WHERE document_sources.source_version <= EXCLUDED.source_version",
             _all_sql(connection),
         )
-        self.assertNotIn("source_document_folder_relation", _all_sql(connection))
+        self.assertIn("source_document_folder_relation", _all_sql(connection))
         self.assertNotIn("folder_ids = EXCLUDED.folder_ids", _all_sql(connection))
         self.assertNotIn("tag_ids", _all_sql(connection))
         self.assertIn("document_type = EXCLUDED.document_type", _all_sql(connection))
@@ -238,7 +238,90 @@ class PostgresAdapterTests(unittest.TestCase):
         self.assertNotIn("profile_json", _all_sql(connection))
 
     def test_index_repository_replaces_document_folder_relation(self) -> None:
-        connection = FakeConnection()
+        connection = FakeConnection(
+            row_sets=[
+                [(1,)],
+                [("old-folder",)],
+                [(1,)],
+                [("folder-1",), ("folder-2",)],
+            ]
+        )
+
+        updated = (
+            PostgresIndexRepository()
+            .replace_document_folder_relation_snapshot_with_connection(
+                connection,
+                snapshot=SourceDocumentFolderRelationSnapshot(
+                    tenant="tenant-1",
+                    document_id="doc-1",
+                    source_version="v1",
+                    folder_ids=("folder-1", "folder-2", "folder-1"),
+                ),
+            )
+        )
+
+        sql = _all_sql(connection)
+        self.assertTrue(updated.applied)
+        self.assertEqual(updated.previous_folder_ids, ("old-folder",))
+        self.assertEqual(updated.current_folder_ids, ("folder-1", "folder-2"))
+        self.assertIn("FROM document_sources", sql)
+        self.assertNotIn("source_document_folder_relation_state", sql)
+        self.assertIn("DELETE FROM source_document_folder_relations", sql)
+        self.assertIn("INSERT INTO source_document_folder_relations", sql)
+        self.assertNotIn("folder_ids = EXCLUDED.folder_ids", sql)
+        relation_insert_params = [
+            params
+            for sql, params in connection.calls
+            if "INSERT INTO source_document_folder_relations" in sql
+        ]
+        self.assertEqual(
+            relation_insert_params,
+            [
+                ("tenant-1", "doc-1", "folder-1"),
+                ("tenant-1", "doc-1", "folder-2"),
+            ],
+        )
+
+    def test_index_repository_represents_empty_folder_membership_as_no_rows(self) -> None:
+        connection = FakeConnection(
+            row_sets=[
+                [(1,)],
+                [("old-folder",)],
+                [(1,)],
+                [],
+            ]
+        )
+
+        updated = (
+            PostgresIndexRepository()
+            .replace_document_folder_relation_snapshot_with_connection(
+                connection,
+                snapshot=SourceDocumentFolderRelationSnapshot(
+                    tenant="tenant-1",
+                    document_id="doc-1",
+                    source_version="v2",
+                    folder_ids=(),
+                ),
+            )
+        )
+
+        sql = _all_sql(connection)
+        self.assertTrue(updated.applied)
+        self.assertEqual(updated.previous_folder_ids, ("old-folder",))
+        self.assertEqual(updated.current_folder_ids, ())
+        self.assertIn("FROM document_sources", sql)
+        self.assertNotIn("source_document_folder_relation_state", sql)
+        self.assertIn("DELETE FROM source_document_folder_relations", sql)
+        self.assertNotIn("INSERT INTO source_document_folder_relations", sql)
+
+    def test_index_repository_ignores_stale_document_folder_relation(self) -> None:
+        connection = FakeConnection(
+            row_sets=[
+                [(1,)],
+                [("current-folder",)],
+                [],
+            ]
+        )
 
         updated = (
             PostgresIndexRepository()
@@ -249,14 +332,13 @@ class PostgresAdapterTests(unittest.TestCase):
         )
 
         sql = _all_sql(connection)
-        self.assertTrue(updated)
-        self.assertIn("INSERT INTO source_document_folder_relation", sql)
-        self.assertIn("ON CONFLICT (tenant_id, document_id)", sql)
-        self.assertIn("folder_ids = EXCLUDED.folder_ids", sql)
-        self.assertIn(
-            "WHERE source_document_folder_relation.source_version <= EXCLUDED.source_version",
-            sql,
-        )
+        self.assertFalse(updated.applied)
+        self.assertEqual(updated.previous_folder_ids, ("current-folder",))
+        self.assertEqual(updated.current_folder_ids, ("current-folder",))
+        self.assertIn("FROM document_sources", sql)
+        self.assertNotIn("source_document_folder_relation_state", sql)
+        self.assertNotIn("DELETE FROM source_document_folder_relations", sql)
+        self.assertNotIn("INSERT INTO source_document_folder_relations", sql)
 
     def test_index_repository_deletes_documents_by_global_document_id(
         self,
@@ -282,6 +364,9 @@ class PostgresAdapterTests(unittest.TestCase):
         self.assertIn("DELETE FROM folder_signals", sql)
         self.assertIn("folder_id = ANY", sql)
         self.assertIn("UPDATE folder_index_records", sql)
+        self.assertIn("FROM source_document_folder_relations", sql)
+        self.assertIn("DELETE FROM source_document_folder_relations", sql)
+        self.assertNotIn("source_document_folder_relation_state", sql)
         self.assertNotIn("related_document_id = NULL", sql)
         self.assertEqual(
             [params for _, params in connection.calls],
@@ -351,9 +436,7 @@ class PostgresAdapterTests(unittest.TestCase):
     def test_indexed_document_source_repository_reads_current_folder_relations(
         self,
     ) -> None:
-        connection = FakeConnection(row_sets=[[(
-            ["folder-current"],
-        )]])
+        connection = FakeConnection(row_sets=[[("folder-current",)]])
 
         folder_ids = PostgresIndexedDocumentSourceRepository(
             client=_postgres_client(connection)
@@ -361,7 +444,7 @@ class PostgresAdapterTests(unittest.TestCase):
 
         self.assertEqual(folder_ids, ("folder-current",))
         self.assertIn(
-            "FROM source_document_folder_relation",
+            "FROM source_document_folder_relations",
             _all_sql(connection),
         )
         self.assertEqual([params for _, params in connection.calls], [("tenant-1", "doc-1")])
@@ -939,7 +1022,7 @@ def _sample_document_profile() -> DocumentProfile:
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         title="Architecture memo",
-        signal_set_version="signal-set-v1",
+        signal_generation_version="signal-set-v1",
         model="model-a",
         metadata={"source": "test"},
     )
@@ -963,7 +1046,7 @@ def _sample_folder_relation_snapshot() -> SourceDocumentFolderRelationSnapshot:
     return SourceDocumentFolderRelationSnapshot(
         tenant="tenant-1",
         document_id="doc-1",
-        source_version="rel-v1",
+        source_version="v1",
         folder_ids=("folder-1",),
     )
 

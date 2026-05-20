@@ -6,6 +6,7 @@ from typing import Any
 
 from foldmind_ai_core.adapters.outbound.neo4j.projection import (
     delete_document_projection,
+    delete_folder_signal_projection_before_revision,
     delete_folder_signal_projection,
     delete_folder_projection,
 )
@@ -17,6 +18,9 @@ from foldmind_ai_core.adapters.outbound.neo4j.projection import (
 )
 from foldmind_ai_core.adapters.outbound.neo4j.projection import (
     replace_folder_projection as run_replace_folder_projection,
+)
+from foldmind_ai_core.adapters.outbound.neo4j.projection import (
+    replace_folder_signal_projection as run_replace_folder_signal_projection,
 )
 from foldmind_ai_core.adapters.outbound.neo4j.search import (
     document_ids_for_scope as run_document_ids_for_scope,
@@ -79,7 +83,6 @@ class Neo4jGraphStore:
         self,
         *,
         relationships: FolderRelationshipProjection,
-        signals: FolderSignalProjection,
     ) -> None:
         with self.client.session() as session:
             _execute_write(
@@ -87,6 +90,19 @@ class Neo4jGraphStore:
                 lambda tx: run_replace_folder_projection(
                     tx,
                     relationships=relationships,
+                ),
+            )
+
+    def replace_folder_signals(
+        self,
+        *,
+        signals: FolderSignalProjection,
+    ) -> None:
+        with self.client.session() as session:
+            _execute_write(
+                session,
+                lambda tx: run_replace_folder_signal_projection(
+                    tx,
                     signals=signals,
                 ),
             )
@@ -134,6 +150,22 @@ class Neo4jGraphStore:
                 lambda tx: delete_folder_signal_projection(
                     tx,
                     folder_id=folder_id,
+                ),
+            )
+
+    def delete_folder_signals_before_input_revision(
+        self,
+        *,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> None:
+        with self.client.session() as session:
+            _execute_write(
+                session,
+                lambda tx: delete_folder_signal_projection_before_revision(
+                    tx,
+                    folder_id=folder_id,
+                    folder_signal_input_revision=folder_signal_input_revision,
                 ),
             )
 

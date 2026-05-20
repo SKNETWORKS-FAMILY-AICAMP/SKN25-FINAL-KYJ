@@ -35,7 +35,19 @@ class DeleteDocumentProjectionCommand:
 @dataclass(frozen=True, slots=True)
 class ProjectFolderCommand:
     folder: ProjectionFolder
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectFolderSignalsCommand:
+    folder: ProjectionFolder
+    folder_signal_input_revision: int
     signals: tuple[ProjectionFolderSignal, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class InvalidateFolderSignalsCommand:
+    folder_id: str
+    folder_signal_input_revision: int
 
 
 @dataclass(frozen=True, slots=True)

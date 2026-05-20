@@ -62,6 +62,7 @@ class FakeQdrantModels:
     class PayloadSchemaType:
         KEYWORD = "keyword"
         DATETIME = "datetime"
+        INTEGER = "integer"
 
 
 def install_provider_sdk_fakes() -> None:
@@ -233,7 +234,7 @@ class VectorAdapterTests(unittest.TestCase):
             config=QdrantCollectionConfig(
                 collection_name="documents",
                 vector_size=3,
-                payload_indexes=("tenant", "updated_at"),
+                payload_indexes=("tenant", "updated_at", "folder_signal_input_revision"),
             ),
             settings=QdrantSettings(url="http://qdrant:6333"),
             client=client,
@@ -247,6 +248,7 @@ class VectorAdapterTests(unittest.TestCase):
             [
                 ("documents", "tenant", "keyword"),
                 ("documents", "updated_at", "datetime"),
+                ("documents", "folder_signal_input_revision", "integer"),
             ],
         )
 
@@ -541,7 +543,7 @@ class GraphAdapterTests(unittest.TestCase):
                 created_at="2026-05-01T10:00:00+09:00",
                 updated_at="2026-05-02T11:00:00+09:00",
                 title="Title",
-                signal_set_version="signal-set-v1",
+                signal_generation_version="signal-set-v1",
                 signals=(
                     DocumentSignalNodeProjection(
                         signal_id="signal-1",
@@ -600,7 +602,7 @@ class GraphAdapterTests(unittest.TestCase):
             projection=DocumentFolderRelationProjection(
                 tenant="tenant-1",
                 document_id="doc-1",
-                source_version="rel-v2",
+                source_version="v2",
                 folder_ids=("folder-2",),
             )
         )
@@ -635,7 +637,7 @@ class GraphAdapterTests(unittest.TestCase):
             statements,
         )
         self.assertIn("in_folder:IN_FOLDER", statements)
-        self.assertNotIn("DETACH DELETE", statements)
+        self.assertIn("DETACH DELETE s", statements)
 
     def test_neo4j_deletes_folder_signal_projection(self) -> None:
         client = FakeNeo4jClient()
@@ -663,10 +665,13 @@ class GraphAdapterTests(unittest.TestCase):
                 updated_at="2026-05-02T11:00:00+09:00",
                 parent_folder_id="root",
             ),
+        )
+        repository.replace_folder_signals(
             signals=FolderSignalProjection(
                 tenant="tenant-1",
                 folder_id="folder-1",
                 source_version="folder-v1",
+                folder_signal_input_revision=2,
                 signals=(
                     FolderSignalNodeProjection(
                         signal_id="folder-signal-1",
@@ -678,6 +683,7 @@ class GraphAdapterTests(unittest.TestCase):
                         text="Outlier document",
                         related_document_id="doc-2",
                         confidence=0.7,
+                        folder_signal_input_revision=2,
                     ),
                 ),
             ),
@@ -701,8 +707,12 @@ class GraphAdapterTests(unittest.TestCase):
         self.assertIn("f.deleted = false", statements)
         self.assertNotIn("snapshot_digest", statements)
         self.assertIn("CHILD_OF", statements)
-        self.assertIn("MERGE (s:FolderSignal {signal_id: $signal_id})", statements)
-        self.assertIn("ABOUT_DOCUMENT", statements)
+        self.assertNotIn("MERGE (s:FolderSignal {signal_id: $signal_id})", statements)
+
+        signal_statements = "\n".join(client.sessions[1].transactions[0].statements)
+        self.assertIn("MERGE (s:FolderSignal {signal_id: $signal_id})", signal_statements)
+        self.assertIn("s.folder_signal_input_revision = $folder_signal_input_revision", signal_statements)
+        self.assertIn("ABOUT_DOCUMENT", signal_statements)
 
 
 def _qdrant_collection_client(

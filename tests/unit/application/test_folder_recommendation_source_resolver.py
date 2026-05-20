@@ -93,10 +93,10 @@ class FakeGraphStore:
     def replace_document_folder_relations(self, *, projection: object) -> None:
         raise AssertionError("Graph projection writes are not expected in this test.")
 
-    def replace_folder_hierarchy(self, projection: object) -> None:
-        raise AssertionError("Folder hierarchy writes are not expected in this test.")
+    def replace_folder_projection(self, *, relationships: object) -> None:
+        raise AssertionError("Folder projection writes are not expected in this test.")
 
-    def replace_folder_projection(self, *, relationships: object, signals: object) -> None:
+    def replace_folder_signals(self, *, signals: object) -> None:
         raise AssertionError("Folder projection writes are not expected in this test.")
 
     def document_ids_for_scope(self, *, tenant: str, scope: SearchScope) -> tuple[str, ...]:
@@ -116,6 +116,17 @@ class FakeGraphStore:
 
     def delete_folder(self, *, folder_id: str) -> None:
         raise AssertionError("Graph folder deletes are not expected in this test.")
+
+    def delete_folder_signals(self, *, folder_id: str) -> None:
+        raise AssertionError("Folder signal deletes are not expected in this test.")
+
+    def delete_folder_signals_before_input_revision(
+        self,
+        *,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> None:
+        raise AssertionError("Folder signal deletes are not expected in this test.")
 
     def graph_search(
         self,

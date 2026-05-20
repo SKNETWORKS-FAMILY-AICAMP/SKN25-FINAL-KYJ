@@ -39,7 +39,7 @@ class PostgresMigrationTests(unittest.TestCase):
         for table_name in (
             "tenant_storage_scopes",
             "document_sources",
-            "source_document_folder_relation",
+            "source_document_folder_relations",
             "folder_sources",
             "document_index_records",
             "document_chunks",
@@ -66,9 +66,10 @@ class PostgresMigrationTests(unittest.TestCase):
             "failure_logs",
             "retrieval_runs",
             "retrieval_results",
-            "source_document_folder_relations",
         ):
             self.assertNotIn(f"CREATE TABLE {removed_table}", schema)
+        self.assertNotIn("CREATE TABLE source_document_folder_relation (", schema)
+        self.assertNotIn("CREATE TABLE source_document_folder_relation_state", schema)
 
         self.assertIn("document_id text PRIMARY KEY", schema)
         self.assertIn("folder_id text PRIMARY KEY", schema)
@@ -105,14 +106,14 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertNotIn("metadata", tenant_state_schema)
         document_source_schema = schema[
             schema.index("CREATE TABLE document_sources"):
-            schema.index("CREATE TABLE source_document_folder_relation")
-        ]
-        document_folder_relation_schema = schema[
-            schema.index("CREATE TABLE source_document_folder_relation"):
             schema.index("CREATE TABLE folder_sources")
         ]
         folder_source_schema = schema[
             schema.index("CREATE TABLE folder_sources"):
+            schema.index("CREATE TABLE source_document_folder_relations")
+        ]
+        document_folder_relations_schema = schema[
+            schema.index("CREATE TABLE source_document_folder_relations"):
             schema.index("CREATE TABLE document_index_records")
         ]
         document_index_schema = schema[
@@ -139,21 +140,18 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("source_created_at timestamptz NOT NULL", document_source_schema)
         self.assertIn("source_updated_at timestamptz NOT NULL", document_source_schema)
         self.assertNotIn("folder_ids", document_source_schema)
-        self.assertIn("folder_ids text[] NOT NULL", document_folder_relation_schema)
-        self.assertIn("PRIMARY KEY (tenant_id, document_id)", document_folder_relation_schema)
+        self.assertNotIn("folder_ids", document_folder_relations_schema)
+        self.assertNotIn("source_version", document_folder_relations_schema)
+        self.assertIn("folder_id text NOT NULL", document_folder_relations_schema)
         self.assertIn(
-            "FOREIGN KEY (tenant_id, document_id)",
-            document_folder_relation_schema,
+            "PRIMARY KEY (tenant_id, document_id, folder_id)",
+            document_folder_relations_schema,
         )
         self.assertIn(
             "REFERENCES document_sources (tenant_id, document_id)",
-            document_folder_relation_schema,
+            document_folder_relations_schema,
         )
-        self.assertIn(
-            "array_position(folder_ids, NULL) IS NULL",
-            document_folder_relation_schema,
-        )
-        self.assertNotIn("REFERENCES folder_sources", document_folder_relation_schema)
+        self.assertNotIn("REFERENCES folder_sources", document_folder_relations_schema)
         self.assertNotIn("tag_ids", document_source_schema)
         self.assertIn("content_digest text NOT NULL", document_source_schema)
         self.assertIn("content_size_bytes bigint NOT NULL", document_source_schema)
@@ -175,7 +173,14 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertNotIn("metadata jsonb", folder_signal_schema)
         self.assertNotIn("indexed_snapshot_digest", folder_index_schema)
         self.assertNotIn("index_schema_version", folder_index_schema)
-        self.assertIn("signal_set_version text NOT NULL DEFAULT '1'", folder_index_schema)
+        self.assertIn("signal_generation_version text NOT NULL DEFAULT '1'", folder_index_schema)
+        self.assertIn("folder_signal_input_revision bigint NOT NULL DEFAULT 0", folder_index_schema)
+        self.assertIn("folder_signal_refresh_status text NOT NULL DEFAULT 'empty'", folder_index_schema)
+        self.assertIn(
+            "folder_signal_refresh_status IN ('empty', 'pending', 'ready', 'failed')",
+            folder_index_schema,
+        )
+        self.assertIn("folder_signal_input_revision bigint NOT NULL", folder_signal_schema)
         self.assertIn("attributes_json jsonb NOT NULL", folder_signal_schema)
         self.assertNotIn("payload_json", folder_signal_schema)
         self.assertNotIn("score double precision", folder_signal_schema)
@@ -257,7 +262,8 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertNotIn("REFERENCES folder_index_records", vector_projection_schema)
         self.assertNotIn("status text", vector_projection_schema)
         self.assertIn("vector_projection_source_idx", schema)
-        self.assertIn("source_document_folder_relation_tenant_updated_idx", schema)
+        self.assertNotIn("source_document_folder_relation_state_tenant_updated_idx", schema)
+        self.assertIn("source_document_folder_relations_folder_idx", schema)
         self.assertIn("document_index_records_retention_idx", schema)
         self.assertNotIn("document_chunks_document_idx", schema)
         self.assertNotIn("vector_projection_aggregate_idx", schema)

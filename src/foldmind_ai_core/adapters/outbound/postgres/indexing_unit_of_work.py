@@ -17,6 +17,10 @@ from foldmind_ai_core.core.domain.models.indexing.outbox import OutboxEvent
 from foldmind_ai_core.core.application.models.indexing import (
     DeletedDocumentIdentity,
     DeletedFolderIdentity,
+    DocumentIndexChange,
+    FolderIndexChange,
+    FolderRelationChange,
+    FolderSignalRefreshCommit,
     SourceDocumentFolderRelationSnapshot,
 )
 from foldmind_ai_core.core.domain.models.profiling import (
@@ -57,8 +61,8 @@ class PostgresIndexingTransaction:
         chunks: tuple[DocumentChunk, ...],
         profile: DocumentProfile,
         signals: tuple[DocumentSignal, ...],
-    ) -> None:
-        self.index_repository.upsert_document_index_with_connection(
+    ) -> DocumentIndexChange:
+        return self.index_repository.upsert_document_index_with_connection(
             self.conn,
             document=document,
             chunks=chunks,
@@ -80,7 +84,7 @@ class PostgresIndexingTransaction:
         self,
         *,
         snapshot: SourceDocumentFolderRelationSnapshot,
-    ) -> bool:
+    ) -> FolderRelationChange:
         return self.index_repository.replace_document_folder_relation_snapshot_with_connection(
             self.conn,
             snapshot=snapshot,
@@ -90,12 +94,36 @@ class PostgresIndexingTransaction:
         self,
         *,
         folder: SourceFolder,
-        signals: tuple[FolderSignal, ...] = (),
-    ) -> None:
-        self.index_repository.upsert_folder_index_with_connection(
+    ) -> FolderIndexChange:
+        return self.index_repository.upsert_folder_index_with_connection(
+            self.conn,
+            folder=folder,
+        )
+
+    def current_folder_signal_input_revision(
+        self,
+        *,
+        tenant: str,
+        folder_id: str,
+    ) -> int | None:
+        return self.index_repository.current_folder_signal_input_revision_with_connection(
+            self.conn,
+            tenant=tenant,
+            folder_id=folder_id,
+        )
+
+    def replace_folder_signals(
+        self,
+        *,
+        folder: SourceFolder,
+        signals: tuple[FolderSignal, ...],
+        expected_input_revision: int,
+    ) -> FolderSignalRefreshCommit:
+        return self.index_repository.replace_folder_signals_with_connection(
             self.conn,
             folder=folder,
             signals=signals,
+            expected_input_revision=expected_input_revision,
         )
 
     def mark_folder_deleted(self, *, folder_id: str) -> DeletedFolderIdentity | None:

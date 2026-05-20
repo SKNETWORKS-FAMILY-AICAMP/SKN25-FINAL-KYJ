@@ -5,9 +5,11 @@ from typing import Protocol
 from foldmind_ai_core.core.application.commands.projection import (
     DeleteDocumentProjectionCommand,
     DeleteFolderProjectionCommand,
+    InvalidateFolderSignalsCommand,
     ProjectDocumentFolderRelationsCommand,
     ProjectDocumentCommand,
     ProjectFolderCommand,
+    ProjectFolderSignalsCommand,
 )
 
 
@@ -67,7 +69,12 @@ class DeleteFolderVectorInboundPort(Protocol):
 
 
 class ProjectFolderSignalVectorsInboundPort(Protocol):
-    def execute(self, command: ProjectFolderCommand) -> None:
+    def execute(self, command: ProjectFolderSignalsCommand) -> None:
+        ...
+
+
+class InvalidateFolderSignalVectorsInboundPort(Protocol):
+    def execute(self, command: InvalidateFolderSignalsCommand) -> None:
         ...
 
 
@@ -78,6 +85,16 @@ class DeleteFolderSignalVectorsInboundPort(Protocol):
 
 class ProjectFolderGraphInboundPort(Protocol):
     def execute(self, command: ProjectFolderCommand) -> None:
+        ...
+
+
+class ProjectFolderSignalsGraphInboundPort(Protocol):
+    def execute(self, command: ProjectFolderSignalsCommand) -> None:
+        ...
+
+
+class InvalidateFolderSignalsGraphInboundPort(Protocol):
+    def execute(self, command: InvalidateFolderSignalsCommand) -> None:
         ...
 
 

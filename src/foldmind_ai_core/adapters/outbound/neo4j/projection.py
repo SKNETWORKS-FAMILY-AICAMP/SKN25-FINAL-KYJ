@@ -82,12 +82,21 @@ def replace_folder_projection(
     session: Any,
     *,
     relationships: FolderRelationshipProjection,
-    signals: FolderSignalProjection,
 ) -> None:
     _merge_folder(session, folder_node_from_projection(relationships))
     _delete_folder_parent_edges(session, relationships)
-    _delete_folder_signals(session, signals)
     parent_folder_id = relationships.parent_folder_id
+    if parent_folder_id is None:
+        return
+    _link_folder_to_parent(session, relationships, parent_folder_id)
+
+
+def replace_folder_signal_projection(
+    session: Any,
+    *,
+    signals: FolderSignalProjection,
+) -> None:
+    _delete_folder_signals(session, signals)
     for signal in signals.signals:
         _merge_folder_signal_node(
             session,
@@ -95,9 +104,6 @@ def replace_folder_projection(
         )
         _link_folder_to_signal(session, signals, signal)
         _link_folder_signal_to_related_document(session, signal)
-    if parent_folder_id is None:
-        return
-    _link_folder_to_parent(session, relationships, parent_folder_id)
 
 
 def delete_document_projection(
@@ -124,6 +130,23 @@ def delete_folder_signal_projection(session: Any, *, folder_id: str) -> None:
     )
 
 
+def delete_folder_signal_projection_before_revision(
+    session: Any,
+    *,
+    folder_id: str,
+    folder_signal_input_revision: int,
+) -> None:
+    session.run(
+        """
+        MATCH (s:FolderSignal {folder_id: $folder_id})
+        WHERE coalesce(s.folder_signal_input_revision, 0) < $folder_signal_input_revision
+        DETACH DELETE s
+        """,
+        folder_id=folder_id,
+        folder_signal_input_revision=folder_signal_input_revision,
+    )
+
+
 def delete_folder_projection(session: Any, *, folder_id: str) -> None:
     session.run(
         """
@@ -138,6 +161,9 @@ def delete_folder_projection(session: Any, *, folder_id: str) -> None:
         WITH f
         OPTIONAL MATCH (:Document)-[in_folder:IN_FOLDER]->(f)
         DELETE in_folder
+        WITH f
+        OPTIONAL MATCH (f)-[:HAS_SIGNAL]->(s:FolderSignal)
+        DETACH DELETE s
         """,
         folder_id=folder_id,
     )
@@ -367,6 +393,7 @@ def _merge_folder_signal_node(
         SET s.tenant = $tenant,
             s.folder_id = $folder_id,
             s.source_version = $source_version,
+            s.folder_signal_input_revision = $folder_signal_input_revision,
             s.signal_type = $signal_type,
             s.signal_key = $signal_key,
             s.text = $text,
@@ -379,6 +406,7 @@ def _merge_folder_signal_node(
         tenant=signal.tenant,
         folder_id=signal.folder_id,
         source_version=signal.source_version,
+        folder_signal_input_revision=signal.folder_signal_input_revision,
         signal_type=signal.signal_type,
         signal_key=signal.signal_key,
         text=signal.text,
@@ -404,6 +432,7 @@ def _link_folder_to_signal(
             r.signal_id = $signal_id,
             r.confidence = $confidence,
             r.source_version = $source_version,
+            r.folder_signal_input_revision = $folder_signal_input_revision,
             r.metadata_json = $metadata_json
         """,
         tenant=relationship.tenant,
@@ -411,6 +440,7 @@ def _link_folder_to_signal(
         signal_id=signal.signal_id,
         confidence=relationship.confidence,
         source_version=projection.source_version,
+        folder_signal_input_revision=projection.folder_signal_input_revision,
         metadata_json=relationship.metadata_json,
     )
 

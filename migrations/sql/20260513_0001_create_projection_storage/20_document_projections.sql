@@ -5,8 +5,8 @@ CREATE TABLE document_index_records (
     document_id text PRIMARY KEY
         REFERENCES document_sources (document_id)
         ON DELETE CASCADE,
-    signal_set_version text NOT NULL DEFAULT '1' CHECK (
-        length(btrim(signal_set_version)) > 0
+    signal_generation_version text NOT NULL DEFAULT '1' CHECK (
+        length(btrim(signal_generation_version)) > 0
     ),
     model text NOT NULL DEFAULT '',
     deleted_at timestamptz,

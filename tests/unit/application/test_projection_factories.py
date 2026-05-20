@@ -47,7 +47,7 @@ class ProjectionFactoryTests(unittest.TestCase):
         relation_snapshot = ProjectionDocumentFolderRelationSnapshot(
             tenant="tenant-1",
             document_id="doc-1",
-            source_version="rel-v1",
+            source_version="v1",
             folder_ids=("folder-1",),
         )
 
@@ -57,7 +57,7 @@ class ProjectionFactoryTests(unittest.TestCase):
 
         self.assertEqual(projection.tenant, "tenant-1")
         self.assertEqual(projection.document_id, "doc-1")
-        self.assertEqual(projection.source_version, "rel-v1")
+        self.assertEqual(projection.source_version, "v1")
         self.assertEqual(projection.folder_ids, ("folder-1",))
 
     def test_document_signal_graph_projection_uses_profile_manifest_and_signals(self) -> None:
@@ -67,7 +67,7 @@ class ProjectionFactoryTests(unittest.TestCase):
         projection = document_signal_graph_projection_from_profile(profile, signals)
 
         self.assertEqual(projection.document_id, "doc-1")
-        self.assertEqual(projection.signal_set_version, "signal-set-v1")
+        self.assertEqual(projection.signal_generation_version, "signal-set-v1")
         self.assertEqual(projection.signals[0].signal_type, "summary")
         self.assertEqual(projection.signals[1].signal_key, "startup")
         self.assertEqual(projection.metadata["model"], "test-model")
@@ -191,27 +191,6 @@ class ProjectionFactoryTests(unittest.TestCase):
 
         projection = folder_vector_projection_from_source(
             folder,
-            signals=(
-                ProjectionFolderSignal(
-                    signal_id="folder-signal-summary",
-                    tenant="tenant-1",
-                    folder_id="folder-1",
-                    source_version="folder-v1",
-                    signal_type="summary",
-                    signal_key="folder-summary",
-                    text="Folder holds founder resources.",
-                ),
-                ProjectionFolderSignal(
-                    signal_id="folder-signal-outlier",
-                    tenant="tenant-1",
-                    folder_id="folder-1",
-                    source_version="folder-v1",
-                    signal_type="outlier_document",
-                    signal_key="doc-2",
-                    text="A legal memo is an outlier.",
-                    related_document_id="doc-2",
-                ),
-            ),
             embedding_model="test-embedding",
             embedding_version="test-v1",
             index_schema_version="schema-v1",
@@ -222,7 +201,7 @@ class ProjectionFactoryTests(unittest.TestCase):
         self.assertIn("Founding", projection.embedding_input)
         self.assertIn("/Company/Founding", projection.embedding_input)
         self.assertIn("Founder resources", projection.embedding_input)
-        self.assertIn("Folder holds founder resources.", projection.embedding_input)
+        self.assertNotIn("Folder holds founder resources.", projection.embedding_input)
         self.assertNotIn("A legal memo is an outlier.", projection.embedding_input)
 
 
@@ -236,7 +215,7 @@ def _profile() -> ProjectionDocumentProfile:
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         title="MVP memo",
-        signal_set_version="signal-set-v1",
+        signal_generation_version="signal-set-v1",
         model="test-model",
     )
 

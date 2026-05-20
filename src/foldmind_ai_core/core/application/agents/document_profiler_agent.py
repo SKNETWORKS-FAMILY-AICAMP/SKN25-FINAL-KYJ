@@ -65,7 +65,7 @@ class DocumentProfilerAgent:
             created_at=document.created_at,
             updated_at=document.updated_at,
             title=document.title.strip() or document.document_id,
-            signal_set_version="1",
+            signal_generation_version="1",
             model=self.model,
             metadata={
                 "source_metadata": dict(document.metadata),

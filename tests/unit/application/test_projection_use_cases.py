@@ -7,9 +7,11 @@ from foldmind_ai_core.core.application.errors import ProviderContractError
 from foldmind_ai_core.core.application.commands.projection import (
     DeleteDocumentProjectionCommand,
     DeleteFolderProjectionCommand,
+    InvalidateFolderSignalsCommand,
     ProjectDocumentFolderRelationsCommand,
     ProjectDocumentCommand,
     ProjectFolderCommand,
+    ProjectFolderSignalsCommand,
 )
 from foldmind_ai_core.core.application.models.projection_inputs import (
     ProjectionDocument,
@@ -49,15 +51,18 @@ from foldmind_ai_core.core.application.use_cases.projection.document_vector_proj
 from foldmind_ai_core.core.application.use_cases.projection.folder_vector_projection import (
     DeleteFolderSignalVectorsUseCase,
     DeleteFolderVectorUseCase,
+    InvalidateFolderSignalVectorsUseCase,
     ProjectFolderSignalVectorsUseCase,
     ProjectFolderVectorUseCase,
 )
 from foldmind_ai_core.core.application.use_cases.projection.graph_projection import (
     DeleteDocumentGraphUseCase,
     DeleteFolderGraphUseCase,
+    InvalidateFolderSignalsGraphUseCase,
     ProjectDocumentFolderRelationsGraphUseCase,
     ProjectDocumentGraphUseCase,
     ProjectFolderGraphUseCase,
+    ProjectFolderSignalsGraphUseCase,
 )
 from foldmind_ai_core.core.domain.models.retrieval.results import (
     DocumentRetrievalResult,
@@ -92,6 +97,7 @@ class FakeSourceFreshnessChecker:
     def __init__(self, *, folder_current: bool = True) -> None:
         self.folder_current = folder_current
         self.folder_calls: list[tuple[str, str, str]] = []
+        self.folder_signal_input_revision_calls: list[tuple[str, str, int]] = []
         self.document_folder_relation_calls: list[tuple[str, str, str]] = []
 
     def is_current_document_source(
@@ -123,6 +129,18 @@ class FakeSourceFreshnessChecker:
     ) -> bool:
         self.document_folder_relation_calls.append(
             (tenant, document_id, source_version)
+        )
+        return self.folder_current
+
+    def is_current_folder_signal_input_revision(
+        self,
+        *,
+        tenant: str,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> bool:
+        self.folder_signal_input_revision_calls.append(
+            (tenant, folder_id, folder_signal_input_revision)
         )
         return self.folder_current
 
@@ -273,6 +291,15 @@ class FakeSignalVectorStore:
         self.deleted_folders.append(folder_id)
         self.signals_by_folder.pop(folder_id, None)
 
+    def delete_folder_signals_before_input_revision(
+        self,
+        *,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> None:
+        self.deleted_folders.append(f"{folder_id}@<{folder_signal_input_revision}")
+        self.signals_by_folder.pop(folder_id, None)
+
     def search_signals(
         self,
         *,
@@ -349,9 +376,17 @@ class FakeGraphStore:
         self,
         *,
         relationships: FolderRelationshipProjection,
-        signals: FolderSignalProjection,
     ) -> None:
         self.folders[relationships.folder_id] = relationships.parent_folder_id
+
+    def replace_folder_signals(
+        self,
+        *,
+        signals: FolderSignalProjection,
+    ) -> None:
+        self.signals[signals.folder_id] = tuple(
+            signal.signal_id for signal in signals.signals
+        )
 
     def document_ids_for_scope(
         self,
@@ -380,6 +415,14 @@ class FakeGraphStore:
 
     def delete_folder_signals(self, *, folder_id: str) -> None:
         self.deleted_folder_signals.append(folder_id)
+
+    def delete_folder_signals_before_input_revision(
+        self,
+        *,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> None:
+        self.deleted_folder_signals.append(f"{folder_id}@<{folder_signal_input_revision}")
 
     def delete_folder(self, *, folder_id: str) -> None:
         self.deleted_folders.append(folder_id)
@@ -669,15 +712,9 @@ class ProjectionUseCaseTests(unittest.TestCase):
         self.assertEqual(chunk_vectors.deleted, ["doc-1", "doc-1"])
         self.assertEqual(document_vectors.deleted, ["doc-1", "doc-1"])
         self.assertEqual(signal_vectors.deleted_documents, ["doc-1", "doc-1"])
-        self.assertEqual(
-            signal_vectors.deleted_folders,
-            ["folder-1", "folder-2", "folder-1", "folder-1", "folder-2", "folder-1"],
-        )
+        self.assertEqual(signal_vectors.deleted_folders, ["folder-1", "folder-1"])
         self.assertEqual(graph.deleted_documents, ["doc-1", "doc-1"])
-        self.assertEqual(
-            graph.deleted_folder_signals,
-            ["folder-1", "folder-2", "folder-1", "folder-2"],
-        )
+        self.assertEqual(graph.deleted_folder_signals, [])
         self.assertEqual(folder_vectors.deleted, ["folder-1", "folder-1"])
         self.assertEqual(graph.deleted_folders, ["folder-1", "folder-1"])
         self.assertEqual(
@@ -694,7 +731,7 @@ class ProjectionUseCaseTests(unittest.TestCase):
         )
         self.assertEqual(
             ledger.calls.count(("folder_signal_vectors_deleted", "folder-2")),
-            2,
+            0,
         )
         self.assertEqual(
             ledger.calls.count(("folder_vectors_deleted", "folder-1")),
@@ -702,7 +739,7 @@ class ProjectionUseCaseTests(unittest.TestCase):
         )
         self.assertEqual(
             ledger.calls.count(("folder_signal_vectors_deleted", "folder-1")),
-            4,
+            2,
         )
 
     def test_project_folder_command_projects_each_target_independently(self) -> None:
@@ -711,28 +748,8 @@ class ProjectionUseCaseTests(unittest.TestCase):
         folder_vectors = FakeFolderVectorStore()
         graph = FakeGraphStore()
         ledger = FakeProjectionLedger()
-        command = ProjectFolderCommand(
-            folder=ProjectionFolder(
-                tenant="tenant-1",
-                folder_id="folder-1",
-                source_version="folder-v1",
-                created_at="2026-05-01T10:00:00+09:00",
-                updated_at="2026-05-02T11:00:00+09:00",
-                name="Startup",
-                parent_folder_id="root",
-            ),
-            signals=(
-                ProjectionFolderSignal(
-                    signal_id="folder-signal-1",
-                    tenant="tenant-1",
-                    folder_id="folder-1",
-                    source_version="folder-v1",
-                    signal_type="responsibility",
-                    signal_key="responsibility",
-                    text="Startup folder responsibility.",
-                ),
-            ),
-        )
+        folder_command = _project_folder_command()
+        folder_signals_command = _project_folder_signals_command()
 
         ProjectFolderVectorUseCase(
             embeddings=embeddings,
@@ -743,7 +760,7 @@ class ProjectionUseCaseTests(unittest.TestCase):
                 embedding_version=TEST_EMBEDDING_VERSION,
                 index_schema_version=TEST_INDEX_SCHEMA_VERSION,
             ),
-        ).execute(command)
+        ).execute(folder_command)
         ProjectFolderSignalVectorsUseCase(
             embeddings=embeddings,
             signal_vectors=signal_vectors,
@@ -753,10 +770,13 @@ class ProjectionUseCaseTests(unittest.TestCase):
                 embedding_version=TEST_EMBEDDING_VERSION,
                 index_schema_version=TEST_INDEX_SCHEMA_VERSION,
             ),
-        ).execute(command)
+        ).execute(folder_signals_command)
         ProjectFolderGraphUseCase(
             graph=graph,
-        ).execute(command)
+        ).execute(folder_command)
+        ProjectFolderSignalsGraphUseCase(
+            graph=graph,
+        ).execute(folder_signals_command)
 
         self.assertEqual(folder_vectors.folders, {"folder-1": "folder-v1"})
         self.assertEqual(
@@ -765,9 +785,13 @@ class ProjectionUseCaseTests(unittest.TestCase):
         )
         self.assertEqual(graph.folders, {"folder-1": "root"})
         self.assertEqual(
+            graph.signals,
+            {"folder-1": ("folder-signal-1",)},
+        )
+        self.assertEqual(
             embeddings.texts,
             [
-                "Startup\n\nStartup folder responsibility.",
+                "Startup",
                 "Startup folder responsibility.",
             ],
         )
@@ -782,7 +806,7 @@ class ProjectionUseCaseTests(unittest.TestCase):
         signal_vectors = FakeSignalVectorStore()
         ledger = FakeProjectionLedger()
         source_freshness = FakeSourceFreshnessChecker(folder_current=False)
-        command = _project_folder_command()
+        command = _project_folder_signals_command()
 
         ProjectFolderSignalVectorsUseCase(
             embeddings=embeddings,
@@ -801,8 +825,8 @@ class ProjectionUseCaseTests(unittest.TestCase):
         self.assertEqual(signal_vectors.deleted_folders, [])
         self.assertEqual(ledger.calls, [])
         self.assertEqual(
-            source_freshness.folder_calls,
-            [("tenant-1", "folder-1", "folder-v1")],
+            source_freshness.folder_signal_input_revision_calls,
+            [("tenant-1", "folder-1", 1)],
         )
 
     def test_document_folder_relation_graph_projection_replaces_edges(self) -> None:
@@ -812,7 +836,7 @@ class ProjectionUseCaseTests(unittest.TestCase):
             folder_relation_snapshot=ProjectionDocumentFolderRelationSnapshot(
                 tenant="tenant-1",
                 document_id="doc-1",
-                source_version="rel-v1",
+                source_version="v1",
                 folder_ids=("folder-1",),
             )
         )
@@ -825,30 +849,36 @@ class ProjectionUseCaseTests(unittest.TestCase):
         self.assertEqual(graph.relationships["doc-1"], ("folder-1",))
         self.assertEqual(
             source_freshness.document_folder_relation_calls,
-            [("tenant-1", "doc-1", "rel-v1")],
+            [("tenant-1", "doc-1", "v1")],
         )
 
-    def test_empty_folder_signal_projection_deletes_previous_vectors(self) -> None:
-        embeddings = FakeEmbeddingProvider()
+    def test_folder_signal_invalidation_deletes_previous_revision_vectors(self) -> None:
         signal_vectors = FakeSignalVectorStore()
         signal_vectors.signals_by_folder["folder-1"] = ("old-signal",)
-        ledger = FakeProjectionLedger()
 
-        ProjectFolderSignalVectorsUseCase(
-            embeddings=embeddings,
+        InvalidateFolderSignalVectorsUseCase(
             signal_vectors=signal_vectors,
-            projection_ledger=ledger,
-            projection_spec=VectorProjectionSpec(
-                embedding_model=TEST_EMBEDDING_MODEL,
-                embedding_version=TEST_EMBEDDING_VERSION,
-                index_schema_version=TEST_INDEX_SCHEMA_VERSION,
-            ),
-        ).execute(replace(_project_folder_command(), signals=()))
+        ).execute(
+            InvalidateFolderSignalsCommand(
+                folder_id="folder-1",
+                folder_signal_input_revision=2,
+            )
+        )
 
-        self.assertEqual(embeddings.texts, [])
         self.assertEqual(signal_vectors.signals_by_folder, {})
-        self.assertEqual(signal_vectors.deleted_folders, ["folder-1"])
-        self.assertEqual(ledger.calls, [("folder_signal_vectors_deleted", "folder-1")])
+        self.assertEqual(signal_vectors.deleted_folders, ["folder-1@<2"])
+
+    def test_folder_signal_invalidation_deletes_previous_revision_graph(self) -> None:
+        graph = FakeGraphStore()
+
+        InvalidateFolderSignalsGraphUseCase(graph=graph).execute(
+            InvalidateFolderSignalsCommand(
+                folder_id="folder-1",
+                folder_signal_input_revision=2,
+            )
+        )
+
+        self.assertEqual(graph.deleted_folder_signals, ["folder-1@<2"])
 
 
 def _project_document_command() -> ProjectDocumentCommand:
@@ -891,7 +921,7 @@ def _project_document_command() -> ProjectDocumentCommand:
         created_at=document.created_at,
         updated_at=document.updated_at,
         title=document.title,
-        signal_set_version="1",
+        signal_generation_version="1",
     )
     signal = ProjectionDocumentSignal(
         signal_id="signal-1",
@@ -924,6 +954,13 @@ def _project_folder_command() -> ProjectFolderCommand:
             name="Startup",
             parent_folder_id="root",
         ),
+    )
+
+
+def _project_folder_signals_command() -> ProjectFolderSignalsCommand:
+    return ProjectFolderSignalsCommand(
+        folder=_project_folder_command().folder,
+        folder_signal_input_revision=1,
         signals=(
             ProjectionFolderSignal(
                 signal_id="folder-signal-1",
@@ -933,6 +970,7 @@ def _project_folder_command() -> ProjectFolderCommand:
                 signal_type="responsibility",
                 signal_key="responsibility",
                 text="Startup folder responsibility.",
+                folder_signal_input_revision=1,
             ),
         ),
     )

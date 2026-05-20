@@ -115,6 +115,11 @@ class QdrantCollectionClient:
             "DATETIME",
         ):
             return self._models.PayloadSchemaType.DATETIME
+        if field_name == "folder_signal_input_revision" and hasattr(
+            self._models.PayloadSchemaType,
+            "INTEGER",
+        ):
+            return self._models.PayloadSchemaType.INTEGER
         return self._models.PayloadSchemaType.KEYWORD
 
     def upsert_points(self, points: list[Any]) -> None:

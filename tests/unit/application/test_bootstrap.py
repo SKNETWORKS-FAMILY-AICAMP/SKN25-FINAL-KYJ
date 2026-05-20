@@ -39,6 +39,10 @@ from foldmind_ai_core.bootstrap.settings import (
 from foldmind_ai_core.core.application.models.indexing import (
     DeletedDocumentIdentity,
     DeletedFolderIdentity,
+    DocumentIndexChange,
+    FolderIndexChange,
+    FolderRelationChange,
+    FolderSignalRefreshCommit,
 )
 from foldmind_ai_core.core.application.models.llm import LLMMessage
 from foldmind_ai_core.core.application.projections.vector import FolderVectorProjection
@@ -238,6 +242,14 @@ class FakeSignalVectorStore:
     ) -> None:
         self.deleted.append(folder_id)
 
+    def delete_folder_signals_before_input_revision(
+        self,
+        *,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> None:
+        self.deleted.append(f"{folder_id}@<{folder_signal_input_revision}")
+
     def search_signals(self, **kwargs: object) -> list[object]:
         return []
 
@@ -263,11 +275,10 @@ class FakeGraphStore:
     def replace_document_folder_relations(self, *, projection: object) -> None:
         self.relationships.append(projection)
 
-    def replace_folder_hierarchy(self, projection: object) -> None:
-        self.folder_hierarchies.append(projection)
-
-    def replace_folder_projection(self, *, relationships: object, signals: object) -> None:
+    def replace_folder_projection(self, *, relationships: object) -> None:
         self.folder_hierarchies.append(relationships)
+
+    def replace_folder_signals(self, *, signals: object) -> None:
         self.signals.append(signals)
 
     def document_ids_for_scope(self, *, tenant: str, scope: SearchScope) -> tuple[str, ...]:
@@ -290,6 +301,14 @@ class FakeGraphStore:
 
     def delete_folder_signals(self, *, folder_id: str) -> None:
         self.deleted_folder_signals.append(folder_id)
+
+    def delete_folder_signals_before_input_revision(
+        self,
+        *,
+        folder_id: str,
+        folder_signal_input_revision: int,
+    ) -> None:
+        self.deleted_folder_signals.append(f"{folder_id}@<{folder_signal_input_revision}")
 
     def delete_folder(self, *, folder_id: str) -> None:
         self.deleted_folders.append(folder_id)
@@ -467,11 +486,16 @@ class FakeIndexingTransaction:
         chunks: tuple[object, ...],
         profile: object,
         signals: tuple[object, ...],
-    ) -> None:
+    ) -> DocumentIndexChange:
         self.document_indexes[str(profile.document_id)] = profile
+        return DocumentIndexChange(applied=True)
 
-    def replace_document_folder_relation_snapshot(self, *, snapshot: object) -> bool:
-        return True
+    def replace_document_folder_relation_snapshot(
+        self,
+        *,
+        snapshot: object,
+    ) -> FolderRelationChange:
+        return FolderRelationChange(applied=True)
 
     def mark_document_deleted(
         self,
@@ -488,9 +512,23 @@ class FakeIndexingTransaction:
         self,
         *,
         folder: object,
-        signals: tuple[object, ...] = (),
-    ) -> None:
-        return None
+    ) -> FolderIndexChange:
+        return FolderIndexChange(applied=True)
+
+    def current_folder_signal_input_revision(self, *, tenant: str, folder_id: str) -> int | None:
+        return 1
+
+    def replace_folder_signals(
+        self,
+        *,
+        folder: object,
+        signals: tuple[object, ...],
+        expected_input_revision: int,
+    ) -> FolderSignalRefreshCommit:
+        return FolderSignalRefreshCommit(
+            applied=True,
+            folder_signal_input_revision=expected_input_revision,
+        )
 
     def mark_folder_deleted(self, *, folder_id: str) -> DeletedFolderIdentity:
         return DeletedFolderIdentity(tenant="tenant-1", folder_id=folder_id)

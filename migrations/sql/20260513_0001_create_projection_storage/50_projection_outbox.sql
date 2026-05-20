@@ -18,6 +18,8 @@ CREATE TABLE outbox_events (
             'DOCUMENT_DELETED',
             'DOCUMENT_FOLDER_RELATIONS_INDEXED',
             'FOLDER_INDEXED',
+            'FOLDER_SIGNALS_INVALIDATED',
+            'FOLDER_SIGNALS_INDEXED',
             'FOLDER_DELETED'
         )
     ),
@@ -41,7 +43,12 @@ CREATE TABLE outbox_events (
         )
         OR (
             source_kind = 'folder'
-            AND event_type IN ('FOLDER_INDEXED', 'FOLDER_DELETED')
+            AND event_type IN (
+                'FOLDER_INDEXED',
+                'FOLDER_SIGNALS_INVALIDATED',
+                'FOLDER_SIGNALS_INDEXED',
+                'FOLDER_DELETED'
+            )
         )
     )
 );
