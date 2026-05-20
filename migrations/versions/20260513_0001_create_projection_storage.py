@@ -69,6 +69,7 @@ UPDATED_AT_TABLES = (
     "source_document_folder_relations",
     "folder_sources",
     "document_index_records",
+    "document_chunks",
     "document_signals",
     "folder_index_records",
     "folder_signals",

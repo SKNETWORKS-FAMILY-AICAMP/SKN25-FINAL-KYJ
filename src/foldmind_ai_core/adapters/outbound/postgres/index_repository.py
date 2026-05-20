@@ -155,20 +155,22 @@ DO UPDATE SET
 
 _DELETE_DOCUMENT_CHUNKS_SQL = """
 DELETE FROM document_chunks
-WHERE document_id = %s
+WHERE tenant_id = %s
+  AND document_id = %s
 """
 
 _INSERT_DOCUMENT_CHUNK_SQL = """
 INSERT INTO document_chunks (
     chunk_id,
+    tenant_id,
     document_id,
     index_input_digest,
     chunk_index,
-    text_digest,
-    start_offset,
-    end_offset
+    search_text,
+    source_start_offset,
+    source_end_offset
 )
-VALUES (%s, %s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 _DELETE_DOCUMENT_SIGNALS_SQL = """
@@ -496,16 +498,17 @@ class PostgresIndexRepository:
                 profile.signal_generation_version,
             ),
         )
-        conn.execute(_DELETE_DOCUMENT_CHUNKS_SQL, (document.document_id,))
+        conn.execute(_DELETE_DOCUMENT_CHUNKS_SQL, (document.tenant, document.document_id))
         for chunk in chunks:
             conn.execute(
                 _INSERT_DOCUMENT_CHUNK_SQL,
                 (
                     chunk.chunk_id,
+                    document.tenant,
                     document.document_id,
                     chunk.index_input_digest,
                     chunk.chunk_index,
-                    chunk.text_hash,
+                    chunk.text,
                     chunk.start_offset,
                     chunk.end_offset,
                 ),

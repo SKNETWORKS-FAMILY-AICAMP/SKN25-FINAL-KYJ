@@ -14,17 +14,21 @@ from foldmind_ai_core.shared.validation import InvalidInputError
 @dataclass(slots=True)
 class DocumentRetrievalConfig:
     top_k: int = 5
+    keyword_top_k: int = 20
     document_top_k: int = 20
     graph_top_k: int = 20
     comprehensive_top_k: int = 100
     both_sources_bonus: float = 0.15
+    hybrid_rrf_k: int = 60
 
     def __post_init__(self) -> None:
         for field_name in (
             "top_k",
+            "keyword_top_k",
             "document_top_k",
             "graph_top_k",
             "comprehensive_top_k",
+            "hybrid_rrf_k",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -131,6 +135,37 @@ def boost_chunk_results(
     ]
     boosted.sort(key=lambda result: result.score, reverse=True)
     return boosted
+
+
+def merge_hybrid_chunk_results(
+    *,
+    dense_results: list[RetrievalResult],
+    keyword_results: list[RetrievalResult],
+    rrf_k: int,
+) -> list[RetrievalResult]:
+    if not keyword_results:
+        return dense_results
+    if not dense_results:
+        return keyword_results
+
+    chunks_by_id: dict[str, RetrievalResult] = {}
+    scores_by_id: dict[str, float] = {}
+    for results in (dense_results, keyword_results):
+        for rank, result in enumerate(results, start=1):
+            chunk_id = result.chunk.chunk_id
+            if not chunk_id.strip() or not math.isfinite(result.score):
+                continue
+            chunks_by_id.setdefault(chunk_id, result)
+            scores_by_id[chunk_id] = scores_by_id.get(chunk_id, 0.0) + (
+                1.0 / (rrf_k + rank)
+            )
+
+    merged = [
+        RetrievalResult(chunk=chunks_by_id[chunk_id].chunk, score=score)
+        for chunk_id, score in scores_by_id.items()
+    ]
+    merged.sort(key=lambda result: result.score, reverse=True)
+    return merged
 
 
 def dedupe_results_by_document(results: list[RetrievalResult]) -> list[RetrievalResult]:

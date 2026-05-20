@@ -10,6 +10,9 @@ from foldmind_ai_core.core.application.ports.outbound.indexed_document_source im
 from foldmind_ai_core.core.application.ports.outbound.indexing_unit_of_work import (
     IndexingUnitOfWork,
 )
+from foldmind_ai_core.core.application.ports.outbound.keyword_search import (
+    DocumentKeywordSearchStore,
+)
 from foldmind_ai_core.core.application.ports.outbound.llm import LLMProvider
 from foldmind_ai_core.core.application.ports.outbound.projection_ledger import (
     ProjectionLedger,
@@ -32,6 +35,7 @@ class ApplicationStorage:
     task_repository: TaskRepository
     indexing_uow: IndexingUnitOfWork
     indexed_document_sources: IndexedDocumentSourceRepository
+    keyword_chunks: DocumentKeywordSearchStore
     chunk_vectors: DocumentChunkVectorStore
     document_vectors: DocumentVectorStore
     folder_vectors: FolderVectorStore

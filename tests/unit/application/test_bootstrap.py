@@ -165,6 +165,18 @@ class FakeDocumentVectorStore:
         return []
 
 
+class FakeDocumentKeywordSearchStore:
+    def search_chunks(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        scope: SearchScope | None = None,
+    ) -> list[RetrievalResult]:
+        return []
+
+
 class FakeFolderVectorStore:
     def __init__(self) -> None:
         self.upserted: list[FolderVectorProjection] = []
@@ -596,6 +608,7 @@ def make_application_storage(
         task_repository=FakeTaskRepository(),
         indexing_uow=FakeIndexingUnitOfWork(),
         indexed_document_sources=FakeIndexedDocumentSourceRepository(),
+        keyword_chunks=FakeDocumentKeywordSearchStore(),
         chunk_vectors=document_vectors,
         document_vectors=document_vectors,
         signal_vectors=signal_vectors or FakeSignalVectorStore(),

@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 
 from foldmind_ai_core.core.application.ports.outbound.embedding import EmbeddingProvider
 from foldmind_ai_core.core.application.ports.outbound.graph_store import GraphStore
+from foldmind_ai_core.core.application.ports.outbound.keyword_search import (
+    DocumentKeywordSearchStore,
+)
 from foldmind_ai_core.core.application.ports.outbound.vector_store import (
     DocumentChunkVectorStore,
     DocumentVectorStore,
@@ -13,6 +16,7 @@ from foldmind_ai_core.core.application.services.document_retrieval_policy import
     boost_chunk_results,
     candidate_scope,
     dedupe_results_by_document,
+    merge_hybrid_chunk_results,
     rank_document_candidates,
 )
 from foldmind_ai_core.core.application.services.embedding_results import embed_one
@@ -29,6 +33,7 @@ class DocumentRetrievalService:
     chunk_vectors: DocumentChunkVectorStore
     document_vectors: DocumentVectorStore
     graph: GraphStore
+    keyword_chunks: DocumentKeywordSearchStore | None = None
     config: DocumentRetrievalConfig = field(default_factory=DocumentRetrievalConfig)
 
     def search(
@@ -57,13 +62,28 @@ class DocumentRetrievalService:
             both_sources_bonus=self.config.both_sources_bonus,
         )
         scoped_candidates = candidate_scope(query.scope, document_candidates)
-        results = self.chunk_vectors.search_chunks(
+        dense_results = self.chunk_vectors.search_chunks(
             tenant=tenant,
             query_vector=query_vector,
             top_k=(
                 self.config.comprehensive_top_k if comprehensive else self.config.top_k
             ),
             scope=scoped_candidates,
+        )
+        keyword_results = (
+            self.keyword_chunks.search_chunks(
+                tenant=tenant,
+                query_text=query.text,
+                top_k=self.config.keyword_top_k,
+                scope=scoped_candidates,
+            )
+            if self.keyword_chunks is not None
+            else []
+        )
+        results = merge_hybrid_chunk_results(
+            dense_results=dense_results,
+            keyword_results=keyword_results,
+            rrf_k=self.config.hybrid_rrf_k,
         )
         boosted_results = boost_chunk_results(results, document_candidates)
         boosted_results = sort_by_timestamp_scope(
@@ -73,4 +93,4 @@ class DocumentRetrievalService:
         )
         if comprehensive:
             return dedupe_results_by_document(boosted_results)
-        return boosted_results
+        return boosted_results[: self.config.top_k]

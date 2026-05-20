@@ -153,6 +153,23 @@ class FakeDocumentVectorStores:
         )
 
 
+class FakeKeywordSearchStore:
+    def __init__(self, results: list[RetrievalResult]) -> None:
+        self.results = results
+        self.scopes: list[SearchScope | None] = []
+
+    def search_chunks(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        scope: SearchScope | None = None,
+    ) -> list[RetrievalResult]:
+        self.scopes.append(scope)
+        return self.results[:top_k]
+
+
 class FakeGraphStore:
     def __init__(
         self,
@@ -291,6 +308,7 @@ def make_find_documents_use_case(
     documents: FakeDocumentVectorStores,
     graph: FakeGraphStore,
     result_filter: FakeRelevanceValidator | None = None,
+    keyword_chunks: FakeKeywordSearchStore | None = None,
     config: DocumentRetrievalConfig,
 ) -> FindDocumentsUseCase:
     return FindDocumentsUseCase(
@@ -299,6 +317,7 @@ def make_find_documents_use_case(
             chunk_vectors=documents,
             document_vectors=documents,
             graph=graph,
+            keyword_chunks=keyword_chunks,
             config=config,
         ),
         scope_resolver=RelationshipScopeResolver(graph=graph),
@@ -552,6 +571,57 @@ class DocumentRetrievalTests(unittest.TestCase):
         ).results
 
         self.assertEqual([result.chunk_id for result in results], ["doc-b:chunk:0"])
+
+    def test_keyword_results_are_merged_with_dense_chunk_results(self) -> None:
+        document_port = FakeDocumentVectorStores(
+            chunks=CapturingChunkVectorStore(
+                [make_result("doc-a", "doc-a:chunk:0", 0.9)]
+            ),
+        )
+        keyword_chunks = FakeKeywordSearchStore(
+            [make_result("doc-b", "doc-b:chunk:0", 0.8)]
+        )
+
+        results = make_find_documents_use_case(
+            embeddings=FakeEmbeddingProvider(),
+            documents=document_port,
+            graph=FakeGraphStore([]),
+            keyword_chunks=keyword_chunks,
+            config=DocumentRetrievalConfig(top_k=2, keyword_top_k=1),
+        ).execute(
+            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
+        ).results
+
+        self.assertEqual(
+            {result.document_id for result in results},
+            {"doc-a", "doc-b"},
+        )
+
+    def test_keyword_search_uses_resolved_candidate_scope(self) -> None:
+        chunks = CapturingChunkVectorStore(
+            [make_result("doc-a", "doc-a:chunk:0", 0.9)]
+        )
+        keyword_chunks = FakeKeywordSearchStore([])
+        document_port = FakeDocumentVectorStores(
+            chunks=chunks,
+            documents=FakeDocumentVectorStore(
+                [DocumentRetrievalResult(document=make_document("doc-a"), score=0.7)]
+            ),
+        )
+
+        make_find_documents_use_case(
+            embeddings=FakeEmbeddingProvider(),
+            documents=document_port,
+            graph=FakeGraphStore(
+                [DocumentRetrievalResult(document=make_document("doc-b"), score=0.6)]
+            ),
+            keyword_chunks=keyword_chunks,
+            config=DocumentRetrievalConfig(top_k=1),
+        ).execute(
+            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
+        )
+
+        self.assertEqual(keyword_chunks.scopes[0].document_ids, ("doc-a", "doc-b"))
 
     def test_document_and_chunk_dense_search_reuse_query_embedding(self) -> None:
         embeddings = FakeEmbeddingProvider()

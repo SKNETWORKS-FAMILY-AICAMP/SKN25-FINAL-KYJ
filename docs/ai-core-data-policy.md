@@ -1,122 +1,129 @@
 # AI-Core 데이터 정책
 
-이 문서는 FoldMind AI-Core가 데이터를 어떤 책임과 경계 안에서 저장하고 갱신하는지 정의한다.
-구현 세부 스키마보다 장기 운영 정책을 우선한다.
+이 문서는 FoldMind AI-Core가 어떤 데이터를 소유하고, 어떤 데이터를 받아서 파생 결과로 바꾸며, 그 결과를 어떻게 최신 상태로 유지하는지 설명한다.
+처음 프로젝트를 접하는 사람이 책임 경계를 이해할 수 있도록 구현 세부보다 운영 원칙을 우선한다.
 
-## 1. 데이터 소유권
+## 1. 데이터 책임 경계
 
 - App Server가 원본 사용자 데이터의 source of truth다.
-- 원본 문서, 폴더, 폴더-문서 관계, 원본 태그, 권한, tenant 정책은 App Server가 소유한다.
-- 폴더-문서 관계는 문서별 folder relation snapshot으로 전달된다.
-- AI-Core는 관계 cardinality 정책을 소유하지 않는다. App Server가 문서별로 여러 `folder_id`를 보내면 n:n처럼 동작하고, 항상 하나 이하의 `folder_id`만 보내면 1:n처럼 동작한다.
-- 문서가 아무 폴더에도 속하지 않는 상태는 빈 `folder_ids`를 가진 folder relation snapshot으로 전달된다.
+- 원본 문서, 폴더, 폴더-문서 관계, 태그, 권한, tenant 정책은 App Server가 소유한다.
 - AI-Core는 원본 데이터를 canonical 데이터로 소유하지 않는다.
-- AI-Core는 검색, 추천, 요약, 그래프 탐색, RAG를 위한 파생 데이터만 소유한다.
-- 태그 정보가 필요하면 App Server가 source metadata에 opaque 값으로 전달할 수 있지만, AI-Core는 이를 태그 관계나 태그 검색 scope로 해석하지 않는다.
+- AI-Core는 App Server가 전달한 원본 상태를 바탕으로 검색, 추천, 요약, 그래프 탐색, RAG에 필요한 파생 데이터를 만든다.
+- 폴더-문서 관계는 문서별 snapshot으로 전달된다.
+- 관계가 1:n인지 n:n인지는 App Server가 결정한다. AI-Core는 전달받은 폴더 목록을 그대로 해석한다.
+- 문서가 아무 폴더에도 속하지 않는 상태도 App Server가 명시적으로 전달한다.
+- 태그 정보가 필요하면 App Server가 원본 metadata에 opaque 값으로 전달할 수 있지만, AI-Core는 이를 별도 태그 관계나 태그 검색 범위로 승격하지 않는다.
 
-## 2. 최신 상태 유지
+## 2. 최신 상태 중심 운영
 
 - AI-Core는 문서와 폴더에 대해 최신 입력과 최신 분석 결과만 유지한다.
-- 같은 문서나 폴더가 다시 인덱싱되면 이전 분석 결과는 새 결과로 교체한다.
-- 과거 버전별 입력, 과거 분석 결과, 과거 vector, 과거 graph projection은 보존하지 않는다.
-- 과거 이력이 필요하면 App Server 또는 별도 감사/이력 시스템에서 관리한다.
+- 같은 문서나 폴더가 다시 인덱싱되면 이전 파생 결과는 새 결과로 교체한다.
+- AI-Core는 과거 버전별 입력, 과거 분석 결과, 과거 검색 projection을 보존하지 않는다.
+- 과거 이력, 감사 로그, 복원 기능이 필요하면 App Server 또는 별도 이력 시스템에서 관리한다.
+- 이 정책은 AI-Core를 장기 보관 저장소가 아니라 최신 검색과 AI 기능을 위한 파생 저장소로 유지하기 위한 것이다.
 
-## 3. 식별자
+## 3. 사용자 데이터의 식별 기준
 
-- `tenant_id`는 tenant를 식별한다.
-- `document_id`는 App Server가 발급한 전역 유일 문서 ID다.
-- `folder_id`는 App Server가 발급한 전역 유일 폴더 ID다.
-- AI-Core는 `document_id`, `folder_id`를 기준으로 최신 상태를 갱신한다.
-- ID 형식 검증 책임은 App Server에 둔다.
+- Tenant는 AI-Core의 모든 데이터 접근 범위를 나누는 최상위 단위다.
+- 문서와 폴더 ID는 App Server가 발급한다.
+- App Server는 문서 ID와 폴더 ID를 전역 유일하게 제공한다.
+- AI-Core는 문서 ID와 폴더 ID를 기준으로 최신 상태를 갱신한다.
+- ID 형식과 발급 정책의 책임은 App Server에 둔다.
+- 내부 구현에서는 tenant를 `tenant_id`, 문서를 `document_id`, 폴더를 `folder_id`로 저장한다.
 
-## 4. Source Version
+## 4. 원본 변경의 최신성
 
-- `source_version`은 App Server가 제공하는 source 변경 버전이다.
-- 문서의 `source_version`은 본문만의 버전이 아니라 문서 aggregate version이다.
-- 문서 title/content/metadata 또는 폴더 membership이 바뀌면 App Server는 반드시 해당 문서의 `source_version`을 바꿔야 한다.
-- 폴더 추가, 제거, 이동, 전체 비움은 모두 문서 aggregate version 증가 대상이다.
-- Folder relation snapshot의 `source_version`은 별도 relation version이 아니라 같은 문서 aggregate `source_version`이어야 한다.
-- `source_version`은 stale 요청과 오래된 비동기 작업 결과를 막는 aggregate freshness guard다.
-- Chunk, signal, vector point 같은 AI-Core 파생물의 identity에는 `source_version`을 사용하지 않는다.
-- `source_version`은 같은 문서나 폴더 안에서 문자열 사전식 정렬로 비교 가능해야 하며, 의미 있는 입력이 바뀔 때마다 단조 증가해야 한다.
-- AI-Core와 App Server 사이의 계약은 문자열 사전식 정렬에서 더 큰 `source_version`이 더 최신 source임을 보장한다.
-- AI-Core는 오래된 비동기 작업 결과가 최신 결과를 덮어쓰지 못하도록 `source_version`을 기준으로 최신성을 확인한다.
-- 문서는 본문 변경 여부도 함께 확인해 stale result를 막는다.
-- AI-Core는 folder relation snapshot을 적용할 때 현재 document source의 `source_version`과 snapshot `source_version`이 일치하는 경우에만 반영한다.
-- AI-Core에서 relation row가 0개이면 해당 document는 어떤 folder에도 속하지 않는 최신 empty membership으로 해석한다.
-- Relation snapshot이 document source indexing보다 먼저 도착하면 적용하지 않는다. App Server는 document source indexing 이후 relation snapshot을 보내거나 재전송해야 한다.
+- App Server는 원본 문서와 폴더가 변경될 때마다 AI-Core가 구분할 수 있는 변경 버전을 함께 전달한다.
+- AI-Core는 이 변경 버전을 기준으로 오래된 인덱싱 요청이나 늦게 도착한 비동기 작업 결과가 최신 상태를 덮어쓰지 못하게 막는다.
+- 문서의 변경 버전은 본문만이 아니라 문서 전체 상태를 나타낸다.
+- 문서 제목, 본문, metadata, 폴더 위치가 바뀌면 모두 문서 변경으로 본다.
+- 폴더의 변경 버전은 폴더 이름, 경로, 부모 폴더, 설명, metadata 같은 폴더 원본 상태를 나타낸다.
+- 폴더-문서 관계 변경은 별도 원본으로 관리하지 않고, 문서 상태 변경의 일부로 취급한다.
+- 따라서 문서가 폴더에 추가되거나, 폴더에서 제거되거나, 다른 폴더로 이동하면 App Server는 문서 변경으로 AI-Core에 알려야 한다.
+- AI-Core는 현재 문서 상태와 같은 변경 버전으로 온 폴더-문서 관계만 반영한다.
+- 아무 폴더에도 속하지 않는 문서는 빈 폴더 관계로 전달된다.
+- 내부 구현에서는 이 원본 변경 버전을 `source_version`으로 저장한다.
 
-## 5. Index Input Digest
+## 5. 파생 데이터의 재생성 기준
 
-- `content_digest`는 문서 본문 identity다.
-- `index_input_digest`는 AI-Core content projection 생성 입력 identity다.
-- `index_input_digest`는 `content_digest`, chunking policy, embedding/vector policy, projection schema version처럼 AI-Core가 chunk/signal/vector를 만드는 데 사용한 입력으로 계산한다.
-- `index_input_digest`에는 `source_version`을 넣지 않는다.
-- 폴더 membership만 바뀌어 document aggregate `source_version`이 증가해도 본문과 indexing 정책이 같으면 `index_input_digest`는 유지되어야 한다.
-- Chunk id, document signal id, vector point id는 `source_version`이 아니라 `index_input_digest`를 기준으로 안정적으로 생성한다.
-- Folder-derived signal의 `index_input_digest`는 folder source, folder metadata, 현재 member document들의 source/content/index projection identity를 해시한 입력 identity다.
-- `folder_index_records.index_input_digest`와 `folder_signals.index_input_digest`는 같은 folder signal 입력 identity를 사용한다. 별도 숫자형 folder signal input revision은 두지 않는다.
-- Folder signal invalidation worker는 event의 `index_input_digest`가 현재 folder index record와 일치할 때만 stale signal projection을 삭제한다. 삭제 대상은 같은 folder의 signal projection 중 현재 digest와 다른 projection이다.
-- `signal_generation_version`은 현재 저장된 signal set이 어떤 signal 생성 정책 버전으로 만들어졌는지 나타내는 독립 컬럼이다.
-- `chunking_version`, embedding version, schema version은 독립 freshness 컬럼이 아니라 `index_input_digest` 계산 입력으로 관리한다. Extractor version과 LLM model name은 signal row의 extractor/provenance 정보로 관리한다.
-- `generation_model`은 LLM 기반 signal row의 provenance다. Freshness 판단에는 사용하지 않으며 deterministic extractor 결과에서는 비어 있을 수 있다.
+- AI-Core는 원본 데이터를 그대로 보관하지 않고 검색, 추천, 요약, 그래프 탐색, RAG에 필요한 파생 데이터를 만든다.
+- 파생 데이터는 원본 변경마다 항상 다시 만들지 않는다.
+- AI-Core는 “파생 데이터를 만드는 입력이 실제로 바뀌었는가”를 기준으로 재생성 여부를 판단한다.
+- 예를 들어 문서가 다른 폴더로 이동했더라도 본문과 chunking 정책이 같으면 기존 문서 chunk와 vector는 그대로 사용할 수 있다.
+- 반대로 본문, chunking 정책, embedding 정책, signal 생성 정책, projection schema가 바뀌면 같은 문서라도 새 파생 데이터로 다시 만들어야 한다.
+- 이 기준은 원본 변경 버전과 분리해서 관리한다.
+- 원본 변경 버전은 “이 요청이 최신인가”를 판단하기 위한 값이고, 파생 데이터 입력 기준은 “이 파생 데이터를 다시 만들어야 하는가”를 판단하기 위한 값이다.
+- 문서 chunk, 문서 signal, vector projection은 이 파생 데이터 입력 기준을 따라 안정적인 identity를 가진다.
+- 폴더 signal은 폴더 자체의 상태뿐 아니라 현재 폴더 안에 어떤 문서들이 있는지도 입력으로 삼는다.
+- 따라서 문서가 수정되거나 이동되면 관련 폴더 signal은 낡은 것으로 보고 다시 평가 대상이 된다.
+- AI-Core는 낡은 folder signal이 검색, 추천, 정리에 섞이지 않도록 무효화한다.
+- 내부 구현에서는 문서 본문 identity를 `content_digest`로 저장하고, 파생 데이터 입력 기준을 `index_input_digest`로 저장한다.
+- Signal 생성 정책 버전은 `signal_generation_version`으로 저장하고, LLM 생성 결과의 provenance는 `generation_model`로 저장한다.
 
-## 6. 분석 결과
+## 6. 분석 결과의 생명주기
 
-- 문서 분석 결과는 항상 특정 문서에 속한다.
-- 폴더 분석 결과는 항상 특정 폴더에 속한다.
-- 문서나 폴더가 다시 인덱싱되면 기존 분석 결과를 교체한다.
+- AI-Core의 분석 결과는 항상 특정 문서 또는 특정 폴더에 속한다.
+- 문서 분석 결과는 문서를 이해하기 위한 요약, 개념, 엔티티, 이슈, 약속, 주장 등을 담는다.
+- 폴더 분석 결과는 폴더가 어떤 역할을 하는지, 폴더 안의 문서들이 얼마나 잘 모여 있는지, 어떤 문서가 어긋나는지 등을 담는다.
+- 문서나 폴더가 다시 인덱싱되면 기존 분석 결과는 새 분석 결과로 교체한다.
 - 분석 결과를 여러 버전으로 나누어 보존하지 않는다.
-- 문서 삭제 시 그 문서를 포함하던 폴더의 폴더 signal은 함께 무효화한다.
-- AI-Core는 삭제된 문서를 근거로 만든 폴더 signal을 보존하지 않으며, 필요한 경우 App Server가 폴더 책임 평가를 다시 요청해 최신 signal을 만든다.
+- 문서가 삭제되면 그 문서를 근거로 삼던 폴더 분석 결과도 낡은 것으로 본다.
+- 삭제된 문서를 근거로 만든 폴더 분석 결과는 검색, 추천, 정리에 사용하지 않는다.
 
-## 7. Signal
+## 7. 의미 단위
 
-- Signal은 AI-Core가 문서나 폴더에서 추출한 의미 단위다.
-- 문서 signal과 폴더 signal은 서로 다른 책임을 가지므로 분리한다.
-- 문서 signal은 문서 요약, 개념, 엔티티, 이슈, 약속, 주장 등을 표현한다.
-- 폴더 signal은 폴더 요약, 책임 적합도, 응집도, 이상 문서, 커버리지 공백, 이름 불일치, 분리/병합 제안 등을 표현한다.
-- 전체 workspace에 직접 속하는 signal은 만들지 않는다.
-- Signal의 소유자는 항상 문서 또는 폴더 중 하나다.
+- AI-Core는 문서와 폴더에서 검색과 추천에 재사용할 수 있는 의미 단위를 추출한다.
+- 의미 단위는 원문 전체보다 작고, 단순 키워드보다 풍부한 AI-Core의 해석 결과다.
+- 문서에서 나온 의미 단위와 폴더에서 나온 의미 단위는 서로 다른 책임을 가지므로 분리한다.
+- 문서 의미 단위는 문서 내용 이해와 문서 검색을 돕는다.
+- 폴더 의미 단위는 폴더 추천, 폴더 정리, 이상 문서 탐지를 돕는다.
+- 전체 workspace에 직접 속하는 의미 단위는 만들지 않는다.
+- 내부 구현에서는 이 의미 단위를 signal로 저장한다.
 
-## 8. 폴더 책임 평가
+## 8. 폴더 이해와 책임 평가
 
+- AI-Core는 폴더를 단순한 컨테이너가 아니라 문서 묶음의 의미 있는 단위로 해석한다.
 - 폴더 책임 평가는 폴더가 자기 이름, 경로, 설명에 맞는 문서들을 담고 있는지 평가하는 것이다.
 - 폴더 책임 평가는 폴더 추천, 폴더 정리 제안, 이상 문서 탐지에 사용된다.
-- 책임 적합도, 설명과의 정렬, 문서 간 응집도, 이상 문서 여부는 폴더 signal로 표현한다.
-- 폴더 책임 평가는 독립적인 최신 평가 결과로 관리하며, 과거 평가 이력은 보존하지 않는다.
+- 평가는 폴더 자체 정보와 현재 폴더에 속한 문서들을 함께 보고 만든다.
+- 문서가 수정되거나 폴더 membership이 바뀌면 기존 폴더 평가는 낡을 수 있다.
+- AI-Core는 폴더 평가를 최신 결과로만 관리하며, 과거 평가 이력은 보존하지 않는다.
 
-## 9. 상태 관리
+## 9. 작업 상태와 저장 상태의 분리
 
-- source/index 계층은 작업 처리 상태를 소유하지 않는다.
-- `pending`, `processing`, `failed`, `retry`, `locked` 같은 상태는 outbox, job queue, DLQ가 책임진다.
-- source/index 계층은 삭제와 보존 정책만 표현한다.
+- AI-Core는 최신 source와 최신 파생 결과를 저장한다.
+- 장시간 작업, 재시도, 실패, 잠금 같은 처리 상태는 source/index 저장 구조에 섞지 않는다.
+- 작업 처리 상태는 outbox, job queue, DLQ 같은 실행 계층이 책임진다.
+- source/index 저장 구조는 삭제와 보존 정책만 표현한다.
 - 삭제된 데이터는 일정 기간 보존한 뒤 정리할 수 있다.
+- 이 분리는 데이터 모델이 작업 실행 방식에 과하게 묶이지 않도록 하기 위한 것이다.
 
-## 10. Projection
+## 10. Projection 동기화
 
-- PostgreSQL은 최신 source, 최신 분석 결과, outbox event를 저장한다.
-- Qdrant와 Neo4j 반영은 outbox worker가 비동기로 수행한다.
-- Projection worker는 at-least-once delivery를 전제로 멱등해야 한다.
-- 같은 이벤트가 여러 번 처리되어도 최종 결과는 한 번 처리한 것과 같아야 한다.
-- 오래된 projection event는 최신 source와 비교해 무시한다.
+- AI-Core는 하나의 요청 안에서 모든 검색 저장소를 동기적으로 갱신하지 않는다.
+- PostgreSQL에는 최신 source, 최신 분석 결과, projection event를 먼저 저장한다.
+- Vector 검색 저장소와 graph 저장소는 projection event를 소비하는 worker가 비동기로 갱신한다.
+- Projection worker는 같은 이벤트를 여러 번 받아도 같은 최종 상태가 되도록 멱등하게 동작해야 한다.
+- 오래된 projection event는 현재 source나 현재 파생 데이터 입력 기준과 맞지 않으면 무시한다.
+- 이 구조는 인덱싱 요청 경로를 짧게 유지하면서 검색 저장소의 최종 정합성을 맞추기 위한 것이다.
 
-## 11. Qdrant
+## 11. 의미 검색 저장소
 
-- Qdrant는 의미 검색을 위한 vector projection 저장소다.
-- Qdrant는 source of truth가 아니다.
-- 문서, 폴더, chunk, signal은 모두 vector 검색 대상이 될 수 있다.
-- 문서 signal과 폴더 signal은 모두 별도 signal vector로 저장할 수 있다.
-- signal vector는 같은 signal collection 안에서 소유자가 문서인지 폴더인지 구분한다.
-- 폴더 추천, 폴더 책임 평가, 이상 문서 탐지는 folder signal을 검색과 랭킹에 활용할 수 있어야 한다.
+- 의미 검색 저장소는 문장과 문서의 의미적 유사도를 찾기 위한 projection 저장소다.
+- 의미 검색 저장소는 source of truth가 아니다.
+- 문서, 폴더, 문서 chunk, 의미 단위는 모두 의미 검색 대상이 될 수 있다.
+- 검색 저장소의 payload는 검색과 ranking에 필요한 projection 정보만 담는다.
+- 폴더 추천, 폴더 책임 평가, 이상 문서 탐지는 폴더에서 추출한 의미 단위를 검색과 ranking에 활용할 수 있어야 한다.
+- 내부 구현에서는 의미 검색 저장소로 Qdrant를 사용한다.
 
-## 12. Neo4j
+## 12. 관계 탐색 저장소
 
-- Neo4j는 graph 탐색과 관계 기반 추천을 위한 projection 저장소다.
-- Neo4j는 source of truth가 아니다.
-- 문서, 폴더, signal 관계의 최신 graph projection만 유지한다.
-- 문서 signal과 폴더 signal은 graph에서도 분리된 개념으로 다룬다.
-- 폴더 signal이 특정 문서를 지목할 때만 해당 문서와 관계를 만든다.
+- 관계 탐색 저장소는 문서, 폴더, 의미 단위 사이의 연결을 탐색하기 위한 projection 저장소다.
+- 관계 탐색 저장소는 source of truth가 아니다.
+- AI-Core는 문서 관계, 폴더 계층, 문서와 폴더의 의미 단위 관계를 최신 projection으로 유지한다.
+- 문서에서 나온 의미 단위와 폴더에서 나온 의미 단위는 graph에서도 분리해서 다룬다.
+- 폴더 의미 단위가 특정 문서를 지목할 때만 해당 문서와 관계를 만든다.
+- 내부 구현에서는 관계 탐색 저장소로 Neo4j를 사용한다.
 
 ## 13. 스키마 운영 원칙
 
@@ -125,3 +132,4 @@
 - 점진 migration, legacy compatibility, dual-write, fallback query는 만들지 않는다.
 - “나중에 필요할 수도 있음”만으로 테이블이나 컬럼을 추가하지 않는다.
 - 필요한 구조라도 현재 책임이 명확하지 않으면 도입하지 않는다.
+- 스키마는 현재 아키텍처의 책임 경계를 명확하게 표현해야 한다.

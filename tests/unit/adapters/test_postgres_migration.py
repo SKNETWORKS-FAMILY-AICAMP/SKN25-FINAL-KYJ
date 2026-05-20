@@ -176,7 +176,17 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("index_input_digest text NOT NULL", document_index_schema)
         self.assertIn("signal_generation_version text NOT NULL DEFAULT '1'", document_index_schema)
         self.assertNotIn("model text", document_index_schema)
+        self.assertIn("tenant_id text NOT NULL", document_chunk_schema)
         self.assertIn("index_input_digest text NOT NULL", document_chunk_schema)
+        self.assertIn("search_text text NOT NULL", document_chunk_schema)
+        self.assertIn("search_vector tsvector GENERATED ALWAYS AS", document_chunk_schema)
+        self.assertIn("source_start_offset integer NOT NULL", document_chunk_schema)
+        self.assertIn("source_end_offset integer NOT NULL", document_chunk_schema)
+        self.assertIn(
+            "REFERENCES document_sources (tenant_id, document_id)",
+            document_chunk_schema,
+        )
+        self.assertNotIn("text_digest", document_chunk_schema)
         self.assertNotIn("source_version", document_chunk_schema)
         self.assertNotIn("chunking_version", document_chunk_schema)
         self.assertIn("index_input_digest text NOT NULL", document_signal_schema)
@@ -212,7 +222,7 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertNotIn("UNIQUE (tenant_id, folder_id)", schema)
         self.assertIn("document_id text PRIMARY KEY\n        REFERENCES document_sources", schema)
         self.assertIn("folder_id text PRIMARY KEY\n        REFERENCES folder_sources", schema)
-        self.assertIn("UNIQUE (document_id, chunk_index)", schema)
+        self.assertIn("UNIQUE (tenant_id, document_id, chunk_index)", schema)
         self.assertNotIn("FOREIGN KEY (chunk_id)", schema)
         self.assertNotIn("REFERENCES document_chunks (chunk_id)", schema)
         self.assertNotIn("FOREIGN KEY (tenant_id, chunk_id)", schema)
@@ -278,6 +288,13 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("source_document_folder_relations_folder_idx", schema)
         self.assertIn("document_index_records_retention_idx", schema)
         self.assertNotIn("document_chunks_document_idx", schema)
+        self.assertIn(
+            "ON document_chunks (tenant_id, document_id, index_input_digest)",
+            schema,
+        )
+        self.assertIn("document_chunks_document_order_idx", schema)
+        self.assertIn("document_chunks_search_idx", schema)
+        self.assertIn("ON document_chunks USING gin (search_vector)", schema)
         self.assertNotIn("vector_projection_aggregate_idx", schema)
         self.assertNotIn("vector_projection_retention_idx", schema)
         self.assertNotIn("tenant_vector_active_binding_uidx", schema)

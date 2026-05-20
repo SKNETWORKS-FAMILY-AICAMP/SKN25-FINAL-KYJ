@@ -8,6 +8,9 @@ from foldmind_ai_core.adapters.outbound.postgres.client import PostgresClient
 from foldmind_ai_core.adapters.outbound.postgres.index_repository import (
     PostgresIndexRepository,
 )
+from foldmind_ai_core.adapters.outbound.postgres.document_keyword_search_store import (
+    PostgresDocumentKeywordSearchStore,
+)
 from foldmind_ai_core.adapters.outbound.postgres.indexed_document_source_repository import (
     PostgresIndexedDocumentSourceRepository,
 )
@@ -29,6 +32,7 @@ from foldmind_ai_core.core.application.models.indexing import (
     SourceDocumentFolderRelationSnapshot,
 )
 from foldmind_ai_core.core.application.projections.vector import DocumentVectorProjection
+from foldmind_ai_core.core.application.queries.retrieval import SearchScope
 from foldmind_ai_core.core.application.services.outbox_events import document_deleted_event
 from foldmind_ai_core.core.domain.models.generation.results import (
     DocumentSearchItem,
@@ -180,6 +184,56 @@ class PostgresAdapterTests(unittest.TestCase):
         settings = PostgresSettings(dsn=" postgresql://not-used ")
         self.assertEqual(settings.dsn, "postgresql://not-used")
 
+    def test_document_keyword_search_store_queries_sparse_chunk_projection(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                (
+                    "tenant-1",
+                    "document",
+                    "doc-1",
+                    "v1",
+                    "index-input-v1",
+                    "2026-05-01T10:00:00+09:00",
+                    "2026-05-02T11:00:00+09:00",
+                    "11111111-1111-4111-8111-111111111111",
+                    0,
+                    "A useful document.",
+                    0,
+                    18,
+                    {"source": "test"},
+                    0.75,
+                )
+            ]
+        )
+
+        results = PostgresDocumentKeywordSearchStore(
+            client=_postgres_client(connection)
+        ).search_chunks(
+            tenant="tenant-1",
+            query_text="useful document",
+            top_k=5,
+            scope=SearchScope(document_ids=("doc-1",), folder_ids=("folder-1",)),
+        )
+
+        sql = _all_sql(connection)
+        self.assertIn("dc.search_vector @@ plainto_tsquery('simple', %s)", sql)
+        self.assertIn("source_document_folder_relations", sql)
+        self.assertEqual(results[0].chunk.text, "A useful document.")
+        self.assertEqual(results[0].chunk.start_offset, 0)
+        self.assertEqual(results[0].chunk.end_offset, 18)
+        self.assertEqual(results[0].score, 0.75)
+        self.assertEqual(
+            connection.calls[0][1],
+            (
+                "useful document",
+                "tenant-1",
+                "useful document",
+                ["doc-1"],
+                ["folder-1"],
+                5,
+            ),
+        )
+
     def test_index_repository_writes_normalized_document_index(self) -> None:
         connection = FakeConnection()
         repository = PostgresIndexRepository()
@@ -238,6 +292,30 @@ class PostgresAdapterTests(unittest.TestCase):
         self.assertNotIn("document_profile_chunk_mentions", _all_sql(connection))
         self.assertNotIn("folder_documents_ref", _all_sql(connection))
         self.assertNotIn("profile_json", _all_sql(connection))
+        self.assertIn("search_text", _all_sql(connection))
+        self.assertIn("source_start_offset", _all_sql(connection))
+        self.assertIn("source_end_offset", _all_sql(connection))
+        self.assertNotIn("text_digest", _all_sql(connection))
+        chunk_insert_params = [
+            params
+            for sql, params in connection.calls
+            if "INSERT INTO document_chunks" in sql
+        ]
+        self.assertEqual(
+            chunk_insert_params,
+            [
+                (
+                    "11111111-1111-4111-8111-111111111111",
+                    "tenant-1",
+                    "doc-1",
+                    "index-input-v1",
+                    0,
+                    "A useful document.",
+                    0,
+                    18,
+                )
+            ],
+        )
 
     def test_index_repository_replaces_document_folder_relation(self) -> None:
         connection = FakeConnection(

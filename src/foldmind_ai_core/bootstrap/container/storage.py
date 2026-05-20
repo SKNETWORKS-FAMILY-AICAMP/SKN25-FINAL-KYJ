@@ -14,6 +14,9 @@ from foldmind_ai_core.core.application.ports.outbound.indexed_document_source im
 from foldmind_ai_core.core.application.ports.outbound.indexing_unit_of_work import (
     IndexingUnitOfWork,
 )
+from foldmind_ai_core.core.application.ports.outbound.keyword_search import (
+    DocumentKeywordSearchStore,
+)
 from foldmind_ai_core.core.application.ports.outbound.task_repository import TaskRepository
 from foldmind_ai_core.core.application.ports.outbound.vector_store import (
     DocumentChunkVectorStore,
@@ -30,6 +33,7 @@ def build_application_storage(settings: APISettings) -> ApplicationStorage:
         task_repository,
         indexing_uow,
         indexed_document_sources,
+        keyword_chunks,
     ) = _build_postgres_storage(settings)
     (
         chunk_vectors,
@@ -43,6 +47,7 @@ def build_application_storage(settings: APISettings) -> ApplicationStorage:
         task_repository=task_repository,
         indexing_uow=indexing_uow,
         indexed_document_sources=indexed_document_sources,
+        keyword_chunks=keyword_chunks,
         chunk_vectors=chunk_vectors,
         document_vectors=document_vectors,
         signal_vectors=signal_vectors,
@@ -100,10 +105,14 @@ def _build_postgres_storage(
     TaskRepository,
     IndexingUnitOfWork,
     IndexedDocumentSourceRepository,
+    DocumentKeywordSearchStore,
 ]:
     from foldmind_ai_core.adapters.outbound.postgres.client import PostgresClient
     from foldmind_ai_core.adapters.outbound.postgres.index_repository import (
         PostgresIndexRepository,
+    )
+    from foldmind_ai_core.adapters.outbound.postgres.document_keyword_search_store import (
+        PostgresDocumentKeywordSearchStore,
     )
     from foldmind_ai_core.adapters.outbound.postgres.indexed_document_source_repository import (
         PostgresIndexedDocumentSourceRepository,
@@ -131,6 +140,7 @@ def _build_postgres_storage(
             outbox_repository=outbox_repository,
         ),
         PostgresIndexedDocumentSourceRepository(client=postgres_client),
+        PostgresDocumentKeywordSearchStore(client=postgres_client),
     )
 
 

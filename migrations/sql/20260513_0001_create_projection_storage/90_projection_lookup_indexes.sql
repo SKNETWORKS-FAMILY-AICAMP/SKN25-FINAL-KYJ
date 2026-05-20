@@ -20,7 +20,15 @@ CREATE INDEX source_document_folder_relations_folder_idx
 
 -- document_chunks_input_digest_idx
 CREATE INDEX document_chunks_input_digest_idx
-    ON document_chunks (document_id, index_input_digest);
+    ON document_chunks (tenant_id, document_id, index_input_digest);
+
+-- document_chunks_document_order_idx
+CREATE INDEX document_chunks_document_order_idx
+    ON document_chunks (tenant_id, document_id, chunk_index);
+
+-- document_chunks_search_idx
+CREATE INDEX document_chunks_search_idx
+    ON document_chunks USING gin (search_vector);
 
 -- folder_sources_tenant_updated_idx
 CREATE INDEX folder_sources_tenant_updated_idx

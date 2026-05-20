@@ -27,18 +27,26 @@ CREATE TABLE document_index_records (
 -- document_chunks
 CREATE TABLE document_chunks (
     chunk_id uuid PRIMARY KEY,
-    document_id text NOT NULL
-        REFERENCES document_sources (document_id)
-        ON DELETE CASCADE,
+    tenant_id text NOT NULL,
+    document_id text NOT NULL,
     index_input_digest text NOT NULL CHECK (
         length(btrim(index_input_digest)) > 0
     ),
     chunk_index integer NOT NULL CHECK (chunk_index >= 0),
-    text_digest text NOT NULL CHECK (length(btrim(text_digest)) > 0),
-    start_offset integer NOT NULL CHECK (start_offset >= 0),
-    end_offset integer NOT NULL CHECK (end_offset >= start_offset),
+    search_text text NOT NULL CHECK (length(btrim(search_text)) > 0),
+    source_start_offset integer NOT NULL CHECK (source_start_offset >= 0),
+    source_end_offset integer NOT NULL CHECK (
+        source_end_offset >= source_start_offset
+    ),
+    search_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', search_text)
+    ) STORED,
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (document_id, chunk_index)
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, document_id, chunk_index),
+    FOREIGN KEY (tenant_id, document_id)
+        REFERENCES document_sources (tenant_id, document_id)
+        ON DELETE CASCADE
 );
 
 -- document_signals

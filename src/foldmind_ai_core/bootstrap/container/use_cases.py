@@ -90,6 +90,7 @@ def build_use_cases(
         chunk_vectors=storage.chunk_vectors,
         document_vectors=storage.document_vectors,
         graph=storage.graph,
+        keyword_chunks=storage.keyword_chunks,
         config=document_retrieval_config or DocumentRetrievalConfig(),
     )
     find_documents = FindDocumentsUseCase(
