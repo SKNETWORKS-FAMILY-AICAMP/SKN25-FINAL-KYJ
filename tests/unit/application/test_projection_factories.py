@@ -105,6 +105,7 @@ class ProjectionFactoryTests(unittest.TestCase):
 
         self.assertIn("MVP memo", projection.embedding_input)
         self.assertEqual(projection.title, "MVP memo")
+        self.assertEqual(projection.metadata, {"scope": "research"})
         self.assertIn("Startup MVP validation summary", projection.embedding_input)
         self.assertIn("customer interview", projection.embedding_input)
         self.assertNotIn("Other document concept", projection.embedding_input)
@@ -195,6 +196,7 @@ class ProjectionFactoryTests(unittest.TestCase):
         self.assertEqual(projection.source_version, "folder-v1")
         self.assertEqual(projection.created_at, folder.created_at)
         self.assertEqual(projection.updated_at, folder.updated_at)
+        self.assertTrue(projection.folder_index_input_digest)
         self.assertEqual(projection.parent_folder_id, "root")
         self.assertEqual(projection.description, "Founder resources")
         self.assertEqual(projection.metadata, {"scope": "research"})
@@ -209,6 +211,8 @@ class ProjectionFactoryTests(unittest.TestCase):
             name="Founding",
             path="/Company/Founding",
             description="Founder resources",
+            parent_folder_id="root",
+            metadata={"scope": "research"},
         )
 
         projection = folder_vector_projection_from_source(
@@ -222,7 +226,9 @@ class ProjectionFactoryTests(unittest.TestCase):
         self.assertEqual(projection.source_version, "folder-v1")
         self.assertEqual(projection.name, "Founding")
         self.assertEqual(projection.path, "/Company/Founding")
+        self.assertEqual(projection.parent_folder_id, "root")
         self.assertEqual(projection.description, "Founder resources")
+        self.assertEqual(projection.metadata, {"scope": "research"})
         self.assertIn("Founding", projection.embedding_input)
         self.assertIn("/Company/Founding", projection.embedding_input)
         self.assertIn("Founder resources", projection.embedding_input)
@@ -242,6 +248,7 @@ def _profile() -> ProjectionDocumentProfile:
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         title="MVP memo",
+        metadata={"scope": "research"},
     )
 
 

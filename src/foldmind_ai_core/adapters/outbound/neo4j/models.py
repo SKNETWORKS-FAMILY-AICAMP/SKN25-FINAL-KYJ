@@ -25,6 +25,7 @@ class Neo4jFolderNodeRecord:
     folder_id: str
     label: str | None = None
     source_version: str | None = None
+    folder_index_input_digest: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
     projection_state: str = "reference"

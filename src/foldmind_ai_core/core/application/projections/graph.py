@@ -73,6 +73,7 @@ class FolderRelationshipProjection:
     name: str
     created_at: str
     updated_at: str
+    folder_index_input_digest: str = ""
     path: str | None = None
     parent_folder_id: str | None = None
     description: str = ""

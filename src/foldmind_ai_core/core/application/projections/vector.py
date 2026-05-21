@@ -70,6 +70,7 @@ class DocumentVectorProjection:
     embedding_version: str
     index_schema_version: str
     title: str = ""
+    metadata: Metadata = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,4 +142,6 @@ class FolderVectorProjection:
     index_schema_version: str
     name: str = ""
     path: str | None = None
+    parent_folder_id: str | None = None
     description: str = ""
+    metadata: Metadata = field(default_factory=dict)

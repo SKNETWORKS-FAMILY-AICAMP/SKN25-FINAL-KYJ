@@ -308,6 +308,7 @@ def _build_qdrant_folder_vector_store(
                 payload_indexes=(
                     "tenant",
                     "folder_id",
+                    "parent_folder_id",
                     "source_version",
                     "source_input_digest",
                     "vector_input_digest",

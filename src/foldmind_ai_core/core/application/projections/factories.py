@@ -66,6 +66,7 @@ def document_vector_projection_from_profile(
         embedding_version=embedding_version,
         index_schema_version=index_schema_version,
         title=profile.title,
+        metadata=dict(profile.metadata),
     )
 
 
@@ -174,7 +175,9 @@ def folder_vector_projection_from_source(
         index_schema_version=index_schema_version,
         name=folder.name,
         path=folder.path,
+        parent_folder_id=folder.parent_folder_id,
         description=folder.description,
+        metadata=dict(folder.metadata),
     )
 
 
@@ -296,6 +299,7 @@ def folder_relationship_projection_from_source_folder(
         name=folder.name,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
+        folder_index_input_digest=_folder_index_input_digest(folder),
         path=folder.path,
         parent_folder_id=folder.parent_folder_id,
         description=folder.description,

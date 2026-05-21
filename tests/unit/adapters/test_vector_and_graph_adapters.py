@@ -355,6 +355,7 @@ class VectorAdapterTests(unittest.TestCase):
         self.assertEqual(payloads[1]["content_digest"], "content-digest-1")
         self.assertEqual(payloads[1]["source_input_digest"], "index-input-v1")
         self.assertEqual(payloads[1]["vector_input_digest"], "vector-input-v1")
+        self.assertEqual(payloads[1]["metadata"], {"scope": "research"})
         self.assertNotIn("concept_ids", payloads[1])
         self.assertEqual(payloads[2]["kind"], "signal")
         self.assertEqual(payloads[2]["owner_kind"], "document")
@@ -376,7 +377,9 @@ class VectorAdapterTests(unittest.TestCase):
         self.assertEqual(payloads[3]["related_document_id"], "doc-2")
         self.assertEqual(payloads[4]["name"], "Founding")
         self.assertEqual(payloads[4]["path"], "/Company/Founding")
+        self.assertEqual(payloads[4]["parent_folder_id"], "root")
         self.assertEqual(payloads[4]["description"], "startup folder")
+        self.assertEqual(payloads[4]["metadata"], {"scope": "research"})
         self.assertNotIn("snapshot_digest", payloads[4])
 
     def test_qdrant_folder_search_restores_folder_metadata(self) -> None:
@@ -397,7 +400,9 @@ class VectorAdapterTests(unittest.TestCase):
                     "updated_at": "2026-05-02T11:00:00+09:00",
                     "name": "Founding",
                     "path": "/Company/Founding",
+                    "parent_folder_id": "root",
                     "description": "startup folder",
+                    "metadata": {"scope": "research"},
                     "embedding_input_hash": "folder-hash-1",
                     "embedding_model": "embedding",
                     "embedding_version": "v1",
@@ -414,7 +419,9 @@ class VectorAdapterTests(unittest.TestCase):
 
         self.assertEqual(results[0].folder.name, "Founding")
         self.assertEqual(results[0].folder.path, "/Company/Founding")
+        self.assertEqual(results[0].folder.parent_folder_id, "root")
         self.assertEqual(results[0].folder.description, "startup folder")
+        self.assertEqual(results[0].folder.metadata, {"scope": "research"})
 
     def test_qdrant_signal_search_restores_evidence_and_filters_by_document(self) -> None:
         client = FakeQdrantClient()
@@ -583,6 +590,22 @@ class GraphAdapterTests(unittest.TestCase):
         )
         self.assertIn(
             "FOR (n:FolderSignal) REQUIRE n.signal_id IS UNIQUE",
+            statements,
+        )
+        self.assertIn(
+            "FOR (n:Document) ON (n.tenant, n.document_type)",
+            statements,
+        )
+        self.assertIn(
+            "FOR (n:Folder) ON (n.folder_index_input_digest)",
+            statements,
+        )
+        self.assertIn(
+            "CREATE FULLTEXT INDEX document_graph_text IF NOT EXISTS",
+            statements,
+        )
+        self.assertIn(
+            "CREATE FULLTEXT INDEX folder_graph_text IF NOT EXISTS",
             statements,
         )
         self.assertNotIn(
@@ -785,6 +808,7 @@ class GraphAdapterTests(unittest.TestCase):
                 name="Folder",
                 created_at="2026-05-01T10:00:00+09:00",
                 updated_at="2026-05-02T11:00:00+09:00",
+                folder_index_input_digest="folder-input-v1",
                 parent_folder_id="root",
                 description="Folder description",
                 metadata={"scope": "research"},
@@ -830,6 +854,7 @@ class GraphAdapterTests(unittest.TestCase):
             statements,
         )
         self.assertIn("f.projection_state = $projection_state", statements)
+        self.assertIn("f.folder_index_input_digest = $folder_index_input_digest", statements)
         self.assertIn("REMOVE f.deleted", statements)
         self.assertIn("f.description = $description", statements)
         self.assertNotIn("snapshot_digest", statements)
@@ -837,6 +862,7 @@ class GraphAdapterTests(unittest.TestCase):
         self.assertNotIn("MERGE (s:FolderSignal {signal_id: $signal_id})", statements)
         folder_params = client.sessions[0].transactions[0].calls[0][1]
         self.assertEqual(folder_params["projection_state"], "active")
+        self.assertEqual(folder_params["folder_index_input_digest"], "folder-input-v1")
         self.assertEqual(folder_params["description"], "Folder description")
         self.assertEqual(folder_params["metadata_json"], '{"scope": "research"}')
 
@@ -926,6 +952,7 @@ def _document_projection() -> DocumentVectorProjection:
         embedding_version="test-v1",
         index_schema_version="schema-v1",
         title="MVP memo",
+        metadata={"scope": "research"},
     )
 
 
@@ -1054,7 +1081,9 @@ def _folder_projection() -> FolderVectorProjection:
         index_schema_version="schema-v1",
         name="Founding",
         path="/Company/Founding",
+        parent_folder_id="root",
         description="startup folder",
+        metadata={"scope": "research"},
     )
 
 

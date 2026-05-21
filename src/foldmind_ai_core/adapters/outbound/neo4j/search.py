@@ -111,7 +111,12 @@ def folders_for_documents(
                    folder_id: f.folder_id,
                    source_version: f.source_version,
                    created_at: f.created_at,
-                   updated_at: f.updated_at
+                   updated_at: f.updated_at,
+                   name: f.label,
+                   path_snapshot: f.path_snapshot,
+                   parent_folder_id: f.parent_folder_id,
+                   description: f.description,
+                   metadata_json: f.metadata_json
                }) AS folders
         """,
         tenant=tenant,
@@ -352,7 +357,9 @@ def _folders_from_records(value: object) -> tuple[RetrievedFolder, ...]:
                 updated_at=_record_text(item, "updated_at"),
                 name=_record_text(item, "name"),
                 path=_record_optional_text(item, "path_snapshot"),
+                parent_folder_id=_record_optional_text(item, "parent_folder_id"),
                 description=_record_text(item, "description"),
+                metadata=_metadata_json_dict(item.get("metadata_json")),
             )
         )
     return tuple(folders)

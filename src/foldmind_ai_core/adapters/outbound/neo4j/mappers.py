@@ -156,6 +156,7 @@ def folder_node_from_projection(
         folder_id=projection.folder_id,
         label=projection.name,
         source_version=projection.source_version,
+        folder_index_input_digest=projection.folder_index_input_digest,
         created_at=projection.created_at,
         updated_at=projection.updated_at,
         projection_state="active",

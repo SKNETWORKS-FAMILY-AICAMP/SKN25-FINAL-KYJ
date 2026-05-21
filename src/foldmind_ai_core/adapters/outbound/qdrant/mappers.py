@@ -82,6 +82,7 @@ def document_payload(document: DocumentVectorProjection) -> JsonObject:
             embedding_version=document.embedding_version,
             index_schema_version=document.index_schema_version,
             title=document.title,
+            metadata=dict(document.metadata),
         )
     )
 
@@ -185,7 +186,9 @@ def folder_payload(folder: FolderVectorProjection) -> JsonObject:
             index_schema_version=folder.index_schema_version,
             name=folder.name,
             path=folder.path,
+            parent_folder_id=folder.parent_folder_id,
             description=folder.description,
+            metadata=dict(folder.metadata),
         )
     )
 
@@ -224,6 +227,7 @@ def document_from_payload(payload: JsonObject) -> RetrievedDocument:
         created_at=record.created_at,
         updated_at=record.updated_at,
         snippet=record.title,
+        metadata=dict(record.metadata),
     )
 
 
@@ -257,7 +261,9 @@ def folder_from_payload(payload: JsonObject) -> RetrievedFolder:
         updated_at=record.updated_at,
         name=record.name,
         path=record.path,
+        parent_folder_id=record.parent_folder_id,
         description=record.description,
+        metadata=dict(record.metadata),
     )
 
 
@@ -298,6 +304,7 @@ def document_payload_to_json(payload: QdrantDocumentPayload) -> JsonObject:
         "created_at": payload.created_at,
         "updated_at": payload.updated_at,
         "title": payload.title,
+        "metadata": dict(payload.metadata),
         "embedding_input_hash": payload.embedding_input_hash,
         "embedding_model": payload.embedding_model,
         "embedding_version": payload.embedding_version,
@@ -349,7 +356,9 @@ def folder_payload_to_json(payload: QdrantFolderPayload) -> JsonObject:
         "updated_at": payload.updated_at,
         "name": payload.name,
         "path": payload.path,
+        "parent_folder_id": payload.parent_folder_id,
         "description": payload.description,
+        "metadata": dict(payload.metadata),
         "embedding_model": payload.embedding_model,
         "embedding_version": payload.embedding_version,
         "index_schema_version": payload.index_schema_version,
@@ -398,6 +407,7 @@ def document_payload_from_json(payload: JsonObject) -> QdrantDocumentPayload:
         embedding_version=_optional_text(payload, "embedding_version"),
         index_schema_version=_optional_text(payload, "index_schema_version"),
         title=_optional_content_text(payload.get("title")) or "",
+        metadata=_metadata_json(payload.get("metadata")),
     )
 
 
@@ -481,7 +491,9 @@ def folder_payload_from_json(payload: JsonObject) -> QdrantFolderPayload:
         index_schema_version=_optional_text(payload, "index_schema_version"),
         name=_optional_content_text(payload.get("name")) or "",
         path=_optional_content_text(payload.get("path")),
+        parent_folder_id=_optional_str(payload, "parent_folder_id"),
         description=_optional_content_text(payload.get("description")) or "",
+        metadata=_metadata_json(payload.get("metadata")),
     )
 
 

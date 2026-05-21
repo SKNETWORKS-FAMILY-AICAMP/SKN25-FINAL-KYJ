@@ -41,6 +41,7 @@ class QdrantDocumentPayload:
     embedding_version: str
     index_schema_version: str
     title: str = ""
+    metadata: JsonObject = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,4 +89,6 @@ class QdrantFolderPayload:
     index_schema_version: str
     name: str = ""
     path: str | None = None
+    parent_folder_id: str | None = None
     description: str = ""
+    metadata: JsonObject = field(default_factory=dict)
