@@ -77,7 +77,7 @@ class ProjectFolderSignalVectorsUseCase:
     source_freshness: SourceFreshnessChecker | None = None
 
     def execute(self, command: ProjectFolderSignalsCommand) -> None:
-        if not _is_current_folder_index_input_digest(self.source_freshness, command):
+        if not _is_current_folder_signal_input_digest(self.source_freshness, command):
             return
         projections = tuple(
             folder_signal_vector_projection_from_signal(
@@ -111,6 +111,7 @@ class ProjectFolderSignalVectorsUseCase:
 @dataclass(slots=True)
 class InvalidateFolderSignalVectorsUseCase:
     signal_vectors: SignalVectorStore
+    projection_ledger: ProjectionLedger | None = None
     source_freshness: SourceFreshnessChecker | None = None
 
     def execute(self, command: InvalidateFolderSignalsCommand) -> None:
@@ -118,8 +119,13 @@ class InvalidateFolderSignalVectorsUseCase:
             return
         self.signal_vectors.delete_stale_folder_signals(
             folder_id=command.folder_id,
-            current_index_input_digest=command.index_input_digest,
+            current_folder_signal_input_digest=command.folder_signal_input_digest,
         )
+        if self.projection_ledger is not None:
+            self.projection_ledger.delete_stale_folder_signal_vector_records(
+                folder_id=command.folder_id,
+                current_source_input_digest=command.folder_signal_input_digest,
+            )
 
 
 @dataclass(slots=True)
@@ -149,17 +155,17 @@ def _is_current_folder_source(
     )
 
 
-def _is_current_folder_index_input_digest(
+def _is_current_folder_signal_input_digest(
     source_freshness: SourceFreshnessChecker | None,
     command: ProjectFolderSignalsCommand,
 ) -> bool:
     if source_freshness is None:
         return True
     folder = command.folder
-    return source_freshness.is_current_folder_index_input_digest(
+    return source_freshness.is_current_folder_signal_input_digest(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
-        index_input_digest=command.index_input_digest,
+        folder_signal_input_digest=command.folder_signal_input_digest,
     )
 
 
@@ -169,8 +175,8 @@ def _is_current_folder_signal_invalidation(
 ) -> bool:
     if source_freshness is None:
         return True
-    return source_freshness.is_current_folder_index_input_digest(
+    return source_freshness.is_current_folder_signal_input_digest(
         tenant=command.tenant,
         folder_id=command.folder_id,
-        index_input_digest=command.index_input_digest,
+        folder_signal_input_digest=command.folder_signal_input_digest,
     )

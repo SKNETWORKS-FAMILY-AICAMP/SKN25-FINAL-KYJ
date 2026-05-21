@@ -23,7 +23,8 @@ def validate_document_indexed_context(
         profile.document_id,
         profile.source_version,
     )
-    index_input_digest = profile.index_input_digest
+    document_index_input_digest = profile.document_index_input_digest
+    document_signal_input_digest = profile.document_signal_input_digest
     if not profile.signal_generation_version.strip():
         raise InvalidInputError(
             "document profile signal_generation_version must not be blank."
@@ -37,7 +38,7 @@ def validate_document_indexed_context(
                 chunk.source_version,
             )
             != expected_context
-            or chunk.index_input_digest != index_input_digest
+            or chunk.document_index_input_digest != document_index_input_digest
             for chunk in chunks
         )
         or any(
@@ -47,7 +48,8 @@ def validate_document_indexed_context(
                 signal.source_version,
             )
             != expected_context
-            or signal.index_input_digest != index_input_digest
+            or signal.document_signal_input_digest != document_signal_input_digest
+            or signal.signal_generation_version != profile.signal_generation_version
             for signal in signals
         )
     ):

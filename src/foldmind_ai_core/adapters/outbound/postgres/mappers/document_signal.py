@@ -17,7 +17,8 @@ def document_signal_record_from_domain(
 ) -> PostgresDocumentSignalRecord:
     return PostgresDocumentSignalRecord(
         signal_id=signal.signal_id,
-        index_input_digest=signal.index_input_digest,
+        document_signal_input_digest=signal.document_signal_input_digest,
+        signal_generation_version=signal.signal_generation_version,
         signal_type=str(signal.signal_type),
         signal_key=signal.signal_key,
         text=signal.text,
@@ -36,7 +37,8 @@ def folder_signal_record_from_domain(
     return PostgresFolderSignalRecord(
         signal_id=signal.signal_id,
         folder_id=signal.folder_id,
-        index_input_digest=signal.index_input_digest,
+        folder_signal_input_digest=signal.folder_signal_input_digest,
+        signal_generation_version=signal.signal_generation_version,
         signal_type=str(signal.signal_type),
         signal_key=signal.signal_key,
         text=signal.text,

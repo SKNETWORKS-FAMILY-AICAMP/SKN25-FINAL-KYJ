@@ -24,18 +24,23 @@ INSERT INTO vector_projection_records (
     source_id,
     vector_item_kind,
     vector_item_id,
-    index_input_digest,
+    source_input_digest,
+    vector_input_digest,
     updated_at
 )
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
-ON CONFLICT (collection_name, point_id)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+ON CONFLICT (
+    tenant_id,
+    collection_name,
+    source_kind,
+    source_id,
+    vector_item_kind,
+    vector_item_id
+)
 DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    source_kind = EXCLUDED.source_kind,
-    source_id = EXCLUDED.source_id,
-    vector_item_kind = EXCLUDED.vector_item_kind,
-    vector_item_id = EXCLUDED.vector_item_id,
-    index_input_digest = EXCLUDED.index_input_digest,
+    point_id = EXCLUDED.point_id,
+    source_input_digest = EXCLUDED.source_input_digest,
+    vector_input_digest = EXCLUDED.vector_input_digest,
     updated_at = now()
 """
 
@@ -44,6 +49,14 @@ DELETE FROM vector_projection_records
 WHERE source_kind = %s
   AND source_id = %s
   AND vector_item_kind = ANY(%s)
+"""
+
+_DELETE_STALE_FOLDER_SIGNAL_VECTOR_PROJECTIONS_SQL = """
+DELETE FROM vector_projection_records
+WHERE source_kind = 'folder'
+  AND source_id = %s
+  AND vector_item_kind = 'signal'
+  AND source_input_digest <> %s
 """
 
 
@@ -65,7 +78,8 @@ class PostgresProjectionLedgerRepository:
                 source_id=projection.document_id,
                 vector_item_kind="document",
                 vector_item_id=projection.document_id,
-                index_input_digest=projection.index_input_digest,
+                source_input_digest=projection.source_input_digest,
+                vector_input_digest=projection.vector_input_digest,
                 write=write,
             )
 
@@ -86,7 +100,8 @@ class PostgresProjectionLedgerRepository:
                     source_id=projection.document_id,
                     vector_item_kind="chunk",
                     vector_item_id=projection.chunk_id,
-                    index_input_digest=projection.index_input_digest,
+                    source_input_digest=projection.source_input_digest,
+                    vector_input_digest=projection.vector_input_digest,
                     write=write,
                 )
 
@@ -107,7 +122,8 @@ class PostgresProjectionLedgerRepository:
                     source_id=projection.document_id,
                     vector_item_kind="signal",
                     vector_item_id=projection.signal_id,
-                    index_input_digest=projection.index_input_digest,
+                    source_input_digest=projection.source_input_digest,
+                    vector_input_digest=projection.vector_input_digest,
                     write=write,
                 )
 
@@ -128,7 +144,8 @@ class PostgresProjectionLedgerRepository:
                     source_id=projection.folder_id,
                     vector_item_kind="signal",
                     vector_item_id=projection.signal_id,
-                    index_input_digest=projection.index_input_digest,
+                    source_input_digest=projection.source_input_digest,
+                    vector_input_digest=projection.vector_input_digest,
                     write=write,
                 )
 
@@ -146,7 +163,8 @@ class PostgresProjectionLedgerRepository:
                 source_id=projection.folder_id,
                 vector_item_kind="folder",
                 vector_item_id=projection.folder_id,
-                index_input_digest=projection.index_input_digest,
+                source_input_digest=projection.source_input_digest,
+                vector_input_digest=projection.vector_input_digest,
                 write=write,
             )
 
@@ -190,6 +208,18 @@ class PostgresProjectionLedgerRepository:
                 ("folder", folder_id, ["signal"]),
             )
 
+    def delete_stale_folder_signal_vector_records(
+        self,
+        *,
+        folder_id: str,
+        current_source_input_digest: str,
+    ) -> None:
+        with self.client.transaction() as conn:
+            conn.execute(
+                _DELETE_STALE_FOLDER_SIGNAL_VECTOR_PROJECTIONS_SQL,
+                (folder_id, current_source_input_digest),
+            )
+
     def delete_folder_vector_records(self, *, folder_id: str) -> None:
         with self.client.transaction() as conn:
             conn.execute(
@@ -206,7 +236,8 @@ class PostgresProjectionLedgerRepository:
         source_id: str,
         vector_item_kind: str,
         vector_item_id: str,
-        index_input_digest: str,
+        source_input_digest: str,
+        vector_input_digest: str,
         write: VectorWriteResult,
     ) -> None:
         conn.execute(
@@ -219,6 +250,7 @@ class PostgresProjectionLedgerRepository:
                 source_id,
                 vector_item_kind,
                 vector_item_id,
-                index_input_digest,
+                source_input_digest,
+                vector_input_digest,
             ),
         )

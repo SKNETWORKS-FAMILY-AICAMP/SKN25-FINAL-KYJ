@@ -43,10 +43,11 @@ class DocumentSignal:
     document_type: str | None
     document_id: str
     source_version: str
-    index_input_digest: str
+    document_signal_input_digest: str
     signal_type: DocumentSignalType | str
     signal_key: str
     text: str
+    signal_generation_version: str = "1"
     attributes: JsonObject = field(default_factory=dict)
     evidence: tuple[SignalEvidence, ...] = ()
     confidence: float | None = None
@@ -62,9 +63,11 @@ class FolderSignal:
     tenant: str
     folder_id: str
     source_version: str
+    folder_signal_input_digest: str
     signal_type: FolderSignalType | str
     signal_key: str
     text: str
+    signal_generation_version: str = "1"
     related_document_id: str | None = None
     attributes: JsonObject = field(default_factory=dict)
     evidence: tuple[JsonObject, ...] = ()
@@ -73,7 +76,6 @@ class FolderSignal:
     extractor_version: str = ""
     generation_model: str | None = None
     metadata: Metadata = field(default_factory=dict)
-    index_input_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +87,8 @@ class DocumentProfile:
     created_at: str
     updated_at: str
     title: str
-    index_input_digest: str
+    document_index_input_digest: str
+    document_signal_input_digest: str
     signal_generation_version: str = "1"
     metadata: Metadata = field(default_factory=dict)
 

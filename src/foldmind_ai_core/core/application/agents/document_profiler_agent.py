@@ -23,6 +23,7 @@ from foldmind_ai_core.core.domain.models.profiling import (
 from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
 from foldmind_ai_core.core.domain.services.profiling import (
     DEFAULT_SIGNAL_DEFINITIONS,
+    DocumentSignalInput,
     create_document_signal,
 )
 from foldmind_ai_core.shared.types import JsonObject
@@ -57,12 +58,18 @@ class DocumentProfilerAgent:
                 "Document profiler response must be a JSON object."
             ) from None
 
+        document_index_input_digest = _document_index_input_digest(chunks)
+        document_signal_input_digest = DocumentSignalInput(
+            document_index_input_digest=document_index_input_digest,
+            signal_generation_version=self.prompt_version,
+        ).digest
         profile = DocumentProfile(
             tenant=document.tenant,
             document_type=document.document_type,
             document_id=document.document_id,
             source_version=document.source_version,
-            index_input_digest=_index_input_digest(chunks),
+            document_index_input_digest=document_index_input_digest,
+            document_signal_input_digest=document_signal_input_digest,
             created_at=document.created_at,
             updated_at=document.updated_at,
             title=document.title.strip() or document.document_id,
@@ -71,7 +78,12 @@ class DocumentProfilerAgent:
             },
             signal_generation_version=self.prompt_version,
         )
-        signals = self._signals(document=document, chunks=chunks, payload=parsed)
+        signals = self._signals(
+            document=document,
+            chunks=chunks,
+            document_signal_input_digest=document_signal_input_digest,
+            payload=parsed,
+        )
         return DocumentSignalExtraction(profile=profile, signals=signals)
 
     def _generate(self, document: SourceDocument, chunks: list[DocumentChunk]) -> str:
@@ -107,6 +119,7 @@ class DocumentProfilerAgent:
         *,
         document: SourceDocument,
         chunks: list[DocumentChunk],
+        document_signal_input_digest: str,
         payload: JsonObject,
     ) -> tuple[DocumentSignal, ...]:
         values = payload.get("signals")
@@ -119,12 +132,11 @@ class DocumentProfilerAgent:
                 "Document profiler response must include at least one signal."
             )
         chunk_ids = {chunk.chunk_id for chunk in chunks}
-        index_input_digest = _index_input_digest(chunks)
         signals = tuple(
             self._signal(
                 document=document,
                 chunk_ids=chunk_ids,
-                index_input_digest=index_input_digest,
+                document_signal_input_digest=document_signal_input_digest,
                 payload=item,
             )
             for item in values
@@ -150,7 +162,7 @@ class DocumentProfilerAgent:
         *,
         document: SourceDocument,
         chunk_ids: set[str],
-        index_input_digest: str,
+        document_signal_input_digest: str,
         payload: object,
     ) -> DocumentSignal:
         signal_payload = self._json_object(payload, "signal")
@@ -162,7 +174,8 @@ class DocumentProfilerAgent:
             document_type=document.document_type,
             document_id=document.document_id,
             source_version=document.source_version,
-            index_input_digest=index_input_digest,
+            document_signal_input_digest=document_signal_input_digest,
+            signal_generation_version=self.prompt_version,
             signal_type=signal_type,
             text=text,
             attributes=self._optional_json_object(
@@ -285,7 +298,7 @@ class DocumentProfilerAgent:
         return cast(JsonObject, dict(value))
 
 
-def _index_input_digest(chunks: list[DocumentChunk]) -> str:
+def _document_index_input_digest(chunks: list[DocumentChunk]) -> str:
     if not chunks:
         raise InvalidAgentOutputError("Document profiler requires at least one chunk.")
-    return chunks[0].index_input_digest
+    return chunks[0].document_index_input_digest

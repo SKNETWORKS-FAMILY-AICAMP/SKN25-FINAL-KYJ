@@ -5,8 +5,11 @@ CREATE TABLE folder_index_records (
     folder_id text PRIMARY KEY
         REFERENCES folder_sources (folder_id)
         ON DELETE CASCADE,
-    index_input_digest text NOT NULL CHECK (
-        length(btrim(index_input_digest)) > 0
+    folder_index_input_digest text NOT NULL CHECK (
+        length(btrim(folder_index_input_digest)) > 0
+    ),
+    folder_signal_input_digest text NOT NULL CHECK (
+        length(btrim(folder_signal_input_digest)) > 0
     ),
     signal_generation_version text NOT NULL DEFAULT '1' CHECK (
         length(btrim(signal_generation_version)) > 0
@@ -33,8 +36,11 @@ CREATE TABLE folder_signals (
     folder_id text NOT NULL
         REFERENCES folder_sources (folder_id)
         ON DELETE CASCADE,
-    index_input_digest text NOT NULL CHECK (
-        length(btrim(index_input_digest)) > 0
+    folder_signal_input_digest text NOT NULL CHECK (
+        length(btrim(folder_signal_input_digest)) > 0
+    ),
+    signal_generation_version text NOT NULL CHECK (
+        length(btrim(signal_generation_version)) > 0
     ),
     signal_type text NOT NULL CHECK (
         signal_type IN (

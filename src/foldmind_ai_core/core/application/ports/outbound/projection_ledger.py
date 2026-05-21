@@ -81,5 +81,13 @@ class ProjectionLedger(Protocol):
     def delete_folder_signal_vector_records(self, *, folder_id: str) -> None:
         ...
 
+    def delete_stale_folder_signal_vector_records(
+        self,
+        *,
+        folder_id: str,
+        current_source_input_digest: str,
+    ) -> None:
+        ...
+
     def delete_folder_vector_records(self, *, folder_id: str) -> None:
         ...

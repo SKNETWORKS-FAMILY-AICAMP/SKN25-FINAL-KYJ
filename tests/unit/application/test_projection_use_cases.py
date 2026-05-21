@@ -97,7 +97,7 @@ class FakeSourceFreshnessChecker:
     def __init__(self, *, folder_current: bool = True) -> None:
         self.folder_current = folder_current
         self.folder_calls: list[tuple[str, str, str]] = []
-        self.index_input_digest_calls: list[tuple[str, str, str]] = []
+        self.folder_signal_input_digest_calls: list[tuple[str, str, str]] = []
         self.document_folder_relation_calls: list[tuple[str, str, str]] = []
 
     def is_current_document_source(
@@ -132,15 +132,15 @@ class FakeSourceFreshnessChecker:
         )
         return self.folder_current
 
-    def is_current_folder_index_input_digest(
+    def is_current_folder_signal_input_digest(
         self,
         *,
         tenant: str,
         folder_id: str,
-        index_input_digest: str,
+        folder_signal_input_digest: str,
     ) -> bool:
-        self.index_input_digest_calls.append(
-            (tenant, folder_id, index_input_digest)
+        self.folder_signal_input_digest_calls.append(
+            (tenant, folder_id, folder_signal_input_digest)
         )
         return self.folder_current
 
@@ -295,9 +295,9 @@ class FakeSignalVectorStore:
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
-        self.deleted_folders.append(f"{folder_id}@!={current_index_input_digest}")
+        self.deleted_folders.append(f"{folder_id}@!={current_folder_signal_input_digest}")
         self.signals_by_folder.pop(folder_id, None)
 
     def search_signals(
@@ -420,9 +420,9 @@ class FakeGraphStore:
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
-        self.deleted_folder_signals.append(f"{folder_id}@!={current_index_input_digest}")
+        self.deleted_folder_signals.append(f"{folder_id}@!={current_folder_signal_input_digest}")
 
     def delete_folder(self, *, folder_id: str) -> None:
         self.deleted_folders.append(folder_id)
@@ -515,6 +515,20 @@ class FakeProjectionLedger:
 
     def delete_folder_signal_vector_records(self, *, folder_id: str) -> None:
         self.calls.append(("folder_signal_vectors_deleted", folder_id))
+
+    def delete_stale_folder_signal_vector_records(
+        self,
+        *,
+        folder_id: str,
+        current_source_input_digest: str,
+    ) -> None:
+        self.calls.append(
+            (
+                "stale_folder_signal_vectors_deleted",
+                folder_id,
+                current_source_input_digest,
+            )
+        )
 
     def delete_folder_vector_records(self, *, folder_id: str) -> None:
         self.calls.append(("folder_vectors_deleted", folder_id))
@@ -825,7 +839,7 @@ class ProjectionUseCaseTests(unittest.TestCase):
         self.assertEqual(signal_vectors.deleted_folders, [])
         self.assertEqual(ledger.calls, [])
         self.assertEqual(
-            source_freshness.index_input_digest_calls,
+            source_freshness.folder_signal_input_digest_calls,
             [("tenant-1", "folder-1", "folder-signal-input-v1")],
         )
 
@@ -854,20 +868,32 @@ class ProjectionUseCaseTests(unittest.TestCase):
 
     def test_folder_signal_invalidation_deletes_previous_revision_vectors(self) -> None:
         signal_vectors = FakeSignalVectorStore()
+        projection_ledger = FakeProjectionLedger()
         signal_vectors.signals_by_folder["folder-1"] = ("old-signal",)
 
         InvalidateFolderSignalVectorsUseCase(
             signal_vectors=signal_vectors,
+            projection_ledger=projection_ledger,
         ).execute(
             InvalidateFolderSignalsCommand(
                 tenant="tenant-1",
                 folder_id="folder-1",
-                index_input_digest="folder-signal-input-v2",
+                folder_signal_input_digest="folder-signal-input-v2",
             )
         )
 
         self.assertEqual(signal_vectors.signals_by_folder, {})
         self.assertEqual(signal_vectors.deleted_folders, ["folder-1@!=folder-signal-input-v2"])
+        self.assertEqual(
+            projection_ledger.calls,
+            [
+                (
+                    "stale_folder_signal_vectors_deleted",
+                    "folder-1",
+                    "folder-signal-input-v2",
+                )
+            ],
+        )
 
     def test_folder_signal_invalidation_deletes_previous_revision_graph(self) -> None:
         graph = FakeGraphStore()
@@ -876,7 +902,7 @@ class ProjectionUseCaseTests(unittest.TestCase):
             InvalidateFolderSignalsCommand(
                 tenant="tenant-1",
                 folder_id="folder-1",
-                index_input_digest="folder-signal-input-v2",
+                folder_signal_input_digest="folder-signal-input-v2",
             )
         )
 
@@ -901,7 +927,8 @@ def _project_document_command() -> ProjectDocumentCommand:
         document_id=document.document_id,
         source_version=document.source_version,
         content_digest=document.content_digest,
-        index_input_digest="index-input-v1",
+        source_input_digest="index-input-v1",
+        vector_input_digest="vector-input-v1",
         created_at=document.created_at,
         updated_at=document.updated_at,
         chunk_id="chunk-1",
@@ -921,7 +948,8 @@ def _project_document_command() -> ProjectDocumentCommand:
         document_id=document.document_id,
         source_version=document.source_version,
         content_digest=document.content_digest,
-        index_input_digest=chunk.index_input_digest,
+        document_index_input_digest=chunk.source_input_digest,
+        document_signal_input_digest=chunk.source_input_digest,
         created_at=document.created_at,
         updated_at=document.updated_at,
         title=document.title,
@@ -933,7 +961,7 @@ def _project_document_command() -> ProjectDocumentCommand:
         document_id=document.document_id,
         source_version=document.source_version,
         content_digest=document.content_digest,
-        index_input_digest=chunk.index_input_digest,
+        document_signal_input_digest=chunk.source_input_digest,
         signal_type="summary",
         signal_key="document-summary",
         text="Summary",
@@ -964,7 +992,7 @@ def _project_folder_command() -> ProjectFolderCommand:
 def _project_folder_signals_command() -> ProjectFolderSignalsCommand:
     return ProjectFolderSignalsCommand(
         folder=_project_folder_command().folder,
-        index_input_digest="folder-signal-input-v1",
+        folder_signal_input_digest="folder-signal-input-v1",
         signals=(
             ProjectionFolderSignal(
                 signal_id="folder-signal-1",
@@ -974,7 +1002,7 @@ def _project_folder_signals_command() -> ProjectFolderSignalsCommand:
                 signal_type="responsibility",
                 signal_key="responsibility",
                 text="Startup folder responsibility.",
-                index_input_digest="folder-signal-input-v1",
+                folder_signal_input_digest="folder-signal-input-v1",
             ),
         ),
     )

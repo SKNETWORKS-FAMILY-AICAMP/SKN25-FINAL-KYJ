@@ -5,8 +5,11 @@ CREATE TABLE document_index_records (
     document_id text PRIMARY KEY
         REFERENCES document_sources (document_id)
         ON DELETE CASCADE,
-    index_input_digest text NOT NULL CHECK (
-        length(btrim(index_input_digest)) > 0
+    document_index_input_digest text NOT NULL CHECK (
+        length(btrim(document_index_input_digest)) > 0
+    ),
+    document_signal_input_digest text NOT NULL CHECK (
+        length(btrim(document_signal_input_digest)) > 0
     ),
     signal_generation_version text NOT NULL DEFAULT '1' CHECK (
         length(btrim(signal_generation_version)) > 0
@@ -29,8 +32,8 @@ CREATE TABLE document_chunks (
     chunk_id uuid PRIMARY KEY,
     tenant_id text NOT NULL,
     document_id text NOT NULL,
-    index_input_digest text NOT NULL CHECK (
-        length(btrim(index_input_digest)) > 0
+    document_index_input_digest text NOT NULL CHECK (
+        length(btrim(document_index_input_digest)) > 0
     ),
     chunk_index integer NOT NULL CHECK (chunk_index >= 0),
     search_text text NOT NULL CHECK (length(btrim(search_text)) > 0),
@@ -55,8 +58,11 @@ CREATE TABLE document_signals (
     document_id text NOT NULL
         REFERENCES document_sources (document_id)
         ON DELETE CASCADE,
-    index_input_digest text NOT NULL CHECK (
-        length(btrim(index_input_digest)) > 0
+    document_signal_input_digest text NOT NULL CHECK (
+        length(btrim(document_signal_input_digest)) > 0
+    ),
+    signal_generation_version text NOT NULL CHECK (
+        length(btrim(signal_generation_version)) > 0
     ),
     signal_type text NOT NULL CHECK (
         signal_type IN (

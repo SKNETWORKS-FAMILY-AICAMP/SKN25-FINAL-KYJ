@@ -14,13 +14,17 @@ CREATE INDEX document_sources_purge_idx
     ON document_sources (purge_after)
     WHERE deleted_at IS NOT NULL;
 
+-- document_sources_title_search_idx
+CREATE INDEX document_sources_title_search_idx
+    ON document_sources USING gin (title_search_vector);
+
 -- source_document_folder_relations_folder_idx
 CREATE INDEX source_document_folder_relations_folder_idx
     ON source_document_folder_relations (tenant_id, folder_id);
 
 -- document_chunks_input_digest_idx
 CREATE INDEX document_chunks_input_digest_idx
-    ON document_chunks (tenant_id, document_id, index_input_digest);
+    ON document_chunks (tenant_id, document_id, document_index_input_digest);
 
 -- document_chunks_document_order_idx
 CREATE INDEX document_chunks_document_order_idx
@@ -49,7 +53,7 @@ CREATE INDEX document_signals_type_key_idx
 
 -- document_signals_input_digest_idx
 CREATE INDEX document_signals_input_digest_idx
-    ON document_signals (document_id, index_input_digest);
+    ON document_signals (document_id, document_signal_input_digest);
 
 -- folder_signals_folder_type_idx
 CREATE INDEX folder_signals_folder_type_idx
@@ -57,7 +61,7 @@ CREATE INDEX folder_signals_folder_type_idx
 
 -- folder_signals_input_digest_idx
 CREATE INDEX folder_signals_input_digest_idx
-    ON folder_signals (folder_id, index_input_digest);
+    ON folder_signals (folder_id, folder_signal_input_digest);
 
 -- folder_signals_related_document_idx
 CREATE INDEX folder_signals_related_document_idx
@@ -90,7 +94,8 @@ CREATE INDEX vector_projection_input_digest_idx
         source_kind,
         source_id,
         vector_item_kind,
-        index_input_digest
+        source_input_digest,
+        vector_input_digest
     );
 
 -- outbox_events_source_sequence_idx

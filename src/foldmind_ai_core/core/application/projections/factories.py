@@ -24,8 +24,11 @@ from foldmind_ai_core.core.application.projections.vector import (
     DocumentVectorProjection,
     FolderSignalVectorProjection,
     FolderVectorProjection,
+    VectorInput,
 )
-from foldmind_ai_core.shared.canonical_json import json_digest
+from foldmind_ai_core.shared.input_digest import input_digest
+
+_FOLDER_SOURCE_PROJECTION_POLICY_VERSION = "1"
 
 
 def document_vector_projection_from_profile(
@@ -48,12 +51,12 @@ def document_vector_projection_from_profile(
         document_id=profile.document_id,
         source_version=profile.source_version,
         content_digest=profile.content_digest,
-        index_input_digest=_vector_index_input_digest(
-            kind="document",
+        source_input_digest=profile.document_signal_input_digest,
+        vector_input_digest=_vector_input_digest(
             embedding_input_hash=_content_hash(embedding_input),
             embedding_model=embedding_model,
             embedding_version=embedding_version,
-            index_schema_version=index_schema_version,
+            vector_schema_version=index_schema_version,
         ),
         created_at=profile.created_at,
         updated_at=profile.updated_at,
@@ -62,6 +65,7 @@ def document_vector_projection_from_profile(
         embedding_model=embedding_model,
         embedding_version=embedding_version,
         index_schema_version=index_schema_version,
+        title=profile.title,
     )
 
 
@@ -81,13 +85,14 @@ def signal_vector_projection_from_signal(
         signal_key=signal.signal_key,
         source_version=signal.source_version,
         content_digest=signal.content_digest,
-        index_input_digest=_vector_index_input_digest(
-            kind="document_signal",
+        source_input_digest=signal.document_signal_input_digest,
+        vector_input_digest=_vector_input_digest(
             embedding_input_hash=_content_hash(signal.text),
             embedding_model=embedding_model,
             embedding_version=embedding_version,
-            index_schema_version=index_schema_version,
+            vector_schema_version=index_schema_version,
         ),
+        signal_generation_version=signal.signal_generation_version,
         attributes=dict(signal.attributes),
         confidence=signal.confidence,
         evidence=signal.evidence,
@@ -96,6 +101,9 @@ def signal_vector_projection_from_signal(
         embedding_model=embedding_model,
         embedding_version=embedding_version,
         index_schema_version=index_schema_version,
+        extractor_name=signal.extractor_name,
+        extractor_version=signal.extractor_version,
+        generation_model=signal.generation_model,
         metadata=dict(signal.metadata),
     )
 
@@ -114,7 +122,14 @@ def folder_signal_vector_projection_from_signal(
         signal_type=signal.signal_type,
         signal_key=signal.signal_key,
         source_version=signal.source_version,
-        index_input_digest=signal.index_input_digest,
+        source_input_digest=signal.folder_signal_input_digest,
+        vector_input_digest=_vector_input_digest(
+            embedding_input_hash=_content_hash(signal.text),
+            embedding_model=embedding_model,
+            embedding_version=embedding_version,
+            vector_schema_version=index_schema_version,
+        ),
+        signal_generation_version=signal.signal_generation_version,
         related_document_id=signal.related_document_id,
         attributes=dict(signal.attributes),
         confidence=signal.confidence,
@@ -124,6 +139,9 @@ def folder_signal_vector_projection_from_signal(
         embedding_model=embedding_model,
         embedding_version=embedding_version,
         index_schema_version=index_schema_version,
+        extractor_name=signal.extractor_name,
+        extractor_version=signal.extractor_version,
+        generation_model=signal.generation_model,
         metadata=dict(signal.metadata),
     )
 
@@ -140,12 +158,12 @@ def folder_vector_projection_from_source(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
         source_version=folder.source_version,
-        index_input_digest=_vector_index_input_digest(
-            kind="folder",
+        source_input_digest=_folder_index_input_digest(folder),
+        vector_input_digest=_vector_input_digest(
             embedding_input_hash=_content_hash(embedding_input),
             embedding_model=embedding_model,
             embedding_version=embedding_version,
-            index_schema_version=index_schema_version,
+            vector_schema_version=index_schema_version,
         ),
         created_at=folder.created_at,
         updated_at=folder.updated_at,
@@ -154,6 +172,9 @@ def folder_vector_projection_from_source(
         embedding_model=embedding_model,
         embedding_version=embedding_version,
         index_schema_version=index_schema_version,
+        name=folder.name,
+        path=folder.path,
+        description=folder.description,
     )
 
 
@@ -194,9 +215,13 @@ def signal_graph_projection_from_signal(
         document_id=signal.document_id,
         source_version=signal.source_version,
         content_digest=signal.content_digest,
-        index_input_digest=signal.index_input_digest,
+        document_signal_input_digest=signal.document_signal_input_digest,
+        signal_generation_version=signal.signal_generation_version,
         attributes=dict(signal.attributes),
+        evidence=signal.evidence,
         confidence=signal.confidence,
+        extractor_name=signal.extractor_name,
+        extractor_version=signal.extractor_version,
         generation_model=signal.generation_model,
         metadata=dict(signal.metadata),
     )
@@ -212,7 +237,8 @@ def document_signal_graph_projection_from_profile(
         document_id=profile.document_id,
         source_version=profile.source_version,
         content_digest=profile.content_digest,
-        index_input_digest=profile.index_input_digest,
+        document_index_input_digest=profile.document_index_input_digest,
+        document_signal_input_digest=profile.document_signal_input_digest,
         signal_generation_version=profile.signal_generation_version,
         created_at=profile.created_at,
         updated_at=profile.updated_at,
@@ -226,14 +252,14 @@ def folder_signal_graph_projection_from_folder(
     folder: ProjectionFolder,
     signals: tuple[ProjectionFolderSignal, ...],
     *,
-    index_input_digest: str,
+    folder_signal_input_digest: str,
     signal_generation_version: str = "1",
 ) -> FolderSignalProjection:
     return FolderSignalProjection(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
         source_version=folder.source_version,
-        index_input_digest=index_input_digest,
+        folder_signal_input_digest=folder_signal_input_digest,
         signal_generation_version=signal_generation_version,
         signals=tuple(
             FolderSignalNodeProjection(
@@ -241,13 +267,17 @@ def folder_signal_graph_projection_from_folder(
                 tenant=signal.tenant,
                 folder_id=signal.folder_id,
                 source_version=signal.source_version,
-                index_input_digest=signal.index_input_digest,
+                folder_signal_input_digest=signal.folder_signal_input_digest,
+                signal_generation_version=signal.signal_generation_version,
                 signal_type=signal.signal_type,
                 signal_key=signal.signal_key,
                 text=signal.text,
                 related_document_id=signal.related_document_id,
                 attributes=dict(signal.attributes),
+                evidence=tuple(dict(item) for item in signal.evidence),
                 confidence=signal.confidence,
+                extractor_name=signal.extractor_name,
+                extractor_version=signal.extractor_version,
                 generation_model=signal.generation_model,
                 metadata=dict(signal.metadata),
             )
@@ -268,6 +298,8 @@ def folder_relationship_projection_from_source_folder(
         updated_at=folder.updated_at,
         path=folder.path,
         parent_folder_id=folder.parent_folder_id,
+        description=folder.description,
+        metadata=dict(folder.metadata),
     )
 
 
@@ -279,22 +311,30 @@ def _content_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _vector_index_input_digest(
+def _vector_input_digest(
     *,
-    kind: str,
     embedding_input_hash: str,
     embedding_model: str,
     embedding_version: str,
-    index_schema_version: str,
+    vector_schema_version: str,
 ) -> str:
-    return json_digest(
+    return VectorInput(
+        embedding_input_hash=embedding_input_hash,
+        embedding_model=embedding_model,
+        embedding_version=embedding_version,
+        vector_schema_version=vector_schema_version,
+    ).digest
+
+
+def _folder_index_input_digest(folder: ProjectionFolder) -> str:
+    return input_digest(
+        "folder_index",
         {
-            "kind": kind,
-            "embedding_input_hash": embedding_input_hash,
-            "embedding_model": embedding_model,
-            "embedding_version": embedding_version,
-            "index_schema_version": index_schema_version,
-        }
+            "name": folder.name,
+            "path": folder.path or "",
+            "description": folder.description,
+            "projection_policy_version": _FOLDER_SOURCE_PROJECTION_POLICY_VERSION,
+        },
     )
 
 

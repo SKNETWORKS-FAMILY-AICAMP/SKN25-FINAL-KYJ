@@ -11,7 +11,7 @@ class RetrievedChunkResult:
     document_type: str | None
     document_id: str
     source_version: str
-    index_input_digest: str
+    document_index_input_digest: str
     created_at: str
     updated_at: str
     chunk_id: str
@@ -78,6 +78,9 @@ class RetrievedFolderResult:
     source_version: str
     created_at: str = ""
     updated_at: str = ""
+    name: str = ""
+    path: str | None = None
+    description: str = ""
 
 
 @dataclass(frozen=True, slots=True)

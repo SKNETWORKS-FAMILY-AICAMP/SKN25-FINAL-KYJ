@@ -33,6 +33,9 @@ CREATE TABLE document_sources (
     source_created_at timestamptz NOT NULL,
     source_updated_at timestamptz NOT NULL,
     title text NOT NULL DEFAULT '',
+    title_search_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', title)
+    ) STORED,
     content_digest text NOT NULL CHECK (length(btrim(content_digest)) > 0),
     content_size_bytes bigint NOT NULL CHECK (content_size_bytes >= 0),
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (

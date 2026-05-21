@@ -57,7 +57,7 @@ def make_retrieval_result() -> RetrievalResult:
         document_type="document",
         document_id="doc-1",
         source_version="v1",
-        index_input_digest="index-input-v1",
+        document_index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id="doc-1:chunk:0",

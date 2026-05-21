@@ -41,7 +41,7 @@ class QdrantDocumentVectorStore:
                 self.client.collection_name,
                 "document",
                 projection.document_id,
-                projection.index_input_digest,
+                projection.vector_input_digest,
             ),
         )
         self.delete_document_vector(document_id=projection.document_id)

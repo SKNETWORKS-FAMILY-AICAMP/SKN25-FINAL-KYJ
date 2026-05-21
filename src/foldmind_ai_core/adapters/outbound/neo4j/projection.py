@@ -134,16 +134,16 @@ def delete_stale_folder_signal_projection(
     session: Any,
     *,
     folder_id: str,
-    current_index_input_digest: str,
+    current_folder_signal_input_digest: str,
 ) -> None:
     session.run(
         """
         MATCH (s:FolderSignal {folder_id: $folder_id})
-        WHERE coalesce(s.index_input_digest, '') <> $current_index_input_digest
+        WHERE coalesce(s.folder_signal_input_digest, '') <> $current_folder_signal_input_digest
         DETACH DELETE s
         """,
         folder_id=folder_id,
-        current_index_input_digest=current_index_input_digest,
+        current_folder_signal_input_digest=current_folder_signal_input_digest,
     )
 
 
@@ -151,7 +151,8 @@ def delete_folder_projection(session: Any, *, folder_id: str) -> None:
     session.run(
         """
         MATCH (f:Folder {folder_id: $folder_id})
-        SET f.deleted = true
+        SET f.projection_state = 'deleted'
+        REMOVE f.deleted
         WITH f
         OPTIONAL MATCH (f)-[outgoing_child_of:CHILD_OF]->()
         DELETE outgoing_child_of
@@ -280,6 +281,9 @@ def _merge_document_signal_identity(
             d.label = $label,
             d.source_version = $source_version,
             d.content_digest = $content_digest,
+            d.document_index_input_digest = $document_index_input_digest,
+            d.document_signal_input_digest = $document_signal_input_digest,
+            d.signal_generation_version = $signal_generation_version,
             d.created_at = $created_at,
             d.updated_at = $updated_at,
             d.metadata_json = $metadata_json
@@ -290,6 +294,9 @@ def _merge_document_signal_identity(
         label=document.label,
         source_version=document.source_version,
         content_digest=document.content_digest,
+        document_index_input_digest=document.document_index_input_digest,
+        document_signal_input_digest=document.document_signal_input_digest,
+        signal_generation_version=document.signal_generation_version,
         created_at=document.created_at,
         updated_at=document.updated_at,
         metadata_json=document.metadata_json,
@@ -309,7 +316,7 @@ def _link_document_to_folder(
         """
         MATCH (d:Document {document_id: $document_id})
         MATCH (f:Folder {folder_id: $folder_id})
-        WHERE coalesce(f.deleted, false) = false
+        WHERE f.projection_state <> 'deleted'
         MERGE (d)-[r:IN_FOLDER]->(f)
         SET r.tenant = $tenant,
             r.confidence = 1.0,
@@ -337,9 +344,13 @@ def _merge_document_signal_node(
             s.document_id = $document_id,
             s.source_version = $source_version,
             s.content_digest = $content_digest,
-            s.index_input_digest = $index_input_digest,
+            s.document_signal_input_digest = $document_signal_input_digest,
+            s.signal_generation_version = $signal_generation_version,
             s.attributes_json = $attributes_json,
+            s.evidence_json = $evidence_json,
             s.confidence = $confidence,
+            s.extractor_name = $extractor_name,
+            s.extractor_version = $extractor_version,
             s.generation_model = $generation_model,
             s.metadata_json = $metadata_json
         """,
@@ -351,9 +362,13 @@ def _merge_document_signal_node(
         document_id=signal.document_id,
         source_version=signal.source_version,
         content_digest=signal.content_digest,
-        index_input_digest=signal.index_input_digest,
+        document_signal_input_digest=signal.document_signal_input_digest,
+        signal_generation_version=signal.signal_generation_version,
         attributes_json=signal.attributes_json,
+        evidence_json=signal.evidence_json,
         confidence=signal.confidence,
+        extractor_name=signal.extractor_name,
+        extractor_version=signal.extractor_version,
         generation_model=signal.generation_model,
         metadata_json=signal.metadata_json,
     )
@@ -375,6 +390,8 @@ def _link_document_to_signal(
             r.confidence = $confidence,
             r.source_version = $source_version,
             r.content_digest = $content_digest,
+            r.document_signal_input_digest = $document_signal_input_digest,
+            r.signal_generation_version = $signal_generation_version,
             r.metadata_json = $metadata_json
         """,
         tenant=relationship.tenant,
@@ -383,6 +400,8 @@ def _link_document_to_signal(
         confidence=relationship.confidence,
         source_version=projection.source_version,
         content_digest=projection.content_digest,
+        document_signal_input_digest=projection.document_signal_input_digest,
+        signal_generation_version=projection.signal_generation_version,
         metadata_json=relationship.metadata_json,
     )
 
@@ -397,13 +416,17 @@ def _merge_folder_signal_node(
         SET s.tenant = $tenant,
             s.folder_id = $folder_id,
             s.source_version = $source_version,
-            s.index_input_digest = $index_input_digest,
+            s.folder_signal_input_digest = $folder_signal_input_digest,
+            s.signal_generation_version = $signal_generation_version,
             s.signal_type = $signal_type,
             s.signal_key = $signal_key,
             s.text = $text,
             s.related_document_id = $related_document_id,
             s.attributes_json = $attributes_json,
+            s.evidence_json = $evidence_json,
             s.confidence = $confidence,
+            s.extractor_name = $extractor_name,
+            s.extractor_version = $extractor_version,
             s.generation_model = $generation_model,
             s.metadata_json = $metadata_json
         """,
@@ -411,13 +434,17 @@ def _merge_folder_signal_node(
         tenant=signal.tenant,
         folder_id=signal.folder_id,
         source_version=signal.source_version,
-        index_input_digest=signal.index_input_digest,
+        folder_signal_input_digest=signal.folder_signal_input_digest,
+        signal_generation_version=signal.signal_generation_version,
         signal_type=signal.signal_type,
         signal_key=signal.signal_key,
         text=signal.text,
         related_document_id=signal.related_document_id,
         attributes_json=signal.attributes_json,
+        evidence_json=signal.evidence_json,
         confidence=signal.confidence,
+        extractor_name=signal.extractor_name,
+        extractor_version=signal.extractor_version,
         generation_model=signal.generation_model,
         metadata_json=signal.metadata_json,
     )
@@ -438,7 +465,8 @@ def _link_folder_to_signal(
             r.signal_id = $signal_id,
             r.confidence = $confidence,
             r.source_version = $source_version,
-            r.index_input_digest = $index_input_digest,
+            r.folder_signal_input_digest = $folder_signal_input_digest,
+            r.signal_generation_version = $signal_generation_version,
             r.metadata_json = $metadata_json
         """,
         tenant=relationship.tenant,
@@ -446,7 +474,8 @@ def _link_folder_to_signal(
         signal_id=signal.signal_id,
         confidence=relationship.confidence,
         source_version=projection.source_version,
-        index_input_digest=projection.index_input_digest,
+        folder_signal_input_digest=projection.folder_signal_input_digest,
+        signal_generation_version=projection.signal_generation_version,
         metadata_json=relationship.metadata_json,
     )
 
@@ -486,7 +515,7 @@ def _link_folder_to_parent(
         """
         MATCH (child:Folder {folder_id: $folder_id})
         MATCH (parent:Folder {folder_id: $parent_folder_id})
-        WHERE coalesce(parent.deleted, false) = false
+        WHERE parent.projection_state <> 'deleted'
         MERGE (child)-[r:CHILD_OF]->(parent)
         SET r.tenant = $tenant,
             r.confidence = 1.0,
@@ -504,12 +533,14 @@ def _merge_folder(session: Any, folder: Neo4jFolderNodeRecord) -> None:
         MERGE (f:Folder {folder_id: $folder_id})
         SET f.tenant = $tenant,
             f.label = $label,
+            f.projection_state = $projection_state,
             f.path_snapshot = $path_snapshot,
             f.parent_folder_id = $parent_folder_id,
+            f.description = $description,
             f.created_at = $created_at,
             f.updated_at = $updated_at,
-            f.metadata_json = $metadata_json,
-            f.deleted = false
+            f.metadata_json = $metadata_json
+        REMOVE f.deleted
         FOREACH (_ IN CASE WHEN $source_version IS NULL THEN [] ELSE [1] END |
             SET f.source_version = $source_version
         )
@@ -517,8 +548,10 @@ def _merge_folder(session: Any, folder: Neo4jFolderNodeRecord) -> None:
         tenant=folder.tenant,
         folder_id=folder.folder_id,
         label=folder.label,
+        projection_state=folder.projection_state,
         path_snapshot=folder.path_snapshot,
         parent_folder_id=folder.parent_folder_id,
+        description=folder.description,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         source_version=folder.source_version,
@@ -531,9 +564,10 @@ def _merge_folder_reference(session: Any, folder: Neo4jFolderNodeRecord) -> None
         """
         MERGE (f:Folder {folder_id: $folder_id})
         ON CREATE SET f.tenant = $tenant,
-                      f.deleted = false
+                      f.projection_state = 'reference'
         SET f.tenant = coalesce(f.tenant, $tenant),
-            f.deleted = coalesce(f.deleted, false)
+            f.projection_state = coalesce(f.projection_state, 'reference')
+        REMOVE f.deleted
         """,
         tenant=folder.tenant,
         folder_id=folder.folder_id,

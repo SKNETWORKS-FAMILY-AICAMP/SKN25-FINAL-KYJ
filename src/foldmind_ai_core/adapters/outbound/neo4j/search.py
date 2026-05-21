@@ -18,6 +18,7 @@ from foldmind_ai_core.core.domain.models.retrieval.results import (
 )
 
 _SIGNAL_WEIGHTS = {
+    "DOCUMENT_TITLE": 0.8,
     "HAS_SIGNAL": 0.75,
     "IN_FOLDER": 0.75,
     "FOLDER_DESCENDANT": 0.55,
@@ -103,7 +104,7 @@ def folders_for_documents(
           AND r.tenant = $tenant
           AND f.tenant = $tenant
           AND d.document_id IN $document_ids
-          AND coalesce(f.deleted, false) = false
+          AND coalesce(f.projection_state, 'reference') <> 'deleted'
         RETURN d.document_id AS document_id,
                collect(DISTINCT {
                    tenant: r.tenant,
@@ -149,7 +150,7 @@ def _scoped_document_ids(
                   AND r.tenant = $tenant
                   AND f.tenant = $tenant
                   AND f.folder_id IN $values
-                  AND coalesce(f.deleted, false) = false
+                  AND coalesce(f.projection_state, 'reference') <> 'deleted'
                 RETURN DISTINCT d.document_id AS document_id
                 """,
                 tenant=tenant,
@@ -243,6 +244,16 @@ def _graph_search_queries() -> tuple[tuple[str, str], ...]:
     return (
         (
             f"""
+            MATCH (d:Document)
+            WHERE d.tenant = $tenant
+              AND toLower(coalesce(d.label, '')) CONTAINS $query
+              {scoped}
+            RETURN d, 1.0 AS confidence
+            """,
+            "DOCUMENT_TITLE",
+        ),
+        (
+            f"""
             MATCH (d:Document)-[r:HAS_SIGNAL]->(s:DocumentSignal)
             WHERE d.tenant = $tenant
               AND r.tenant = $tenant
@@ -262,8 +273,11 @@ def _graph_search_queries() -> tuple[tuple[str, str], ...]:
             WHERE d.tenant = $tenant
               AND r.tenant = $tenant
               AND f.tenant = $tenant
-              AND toLower(f.label) CONTAINS $query
-              AND coalesce(f.deleted, false) = false
+              AND (
+                toLower(f.label) CONTAINS $query
+                OR toLower(coalesce(f.description, '')) CONTAINS $query
+              )
+              AND coalesce(f.projection_state, 'reference') <> 'deleted'
               {scoped}
             RETURN d, r.confidence AS confidence
             """,
@@ -278,9 +292,12 @@ def _graph_search_queries() -> tuple[tuple[str, str], ...]:
               AND f.tenant = $tenant
               AND matched.tenant = $tenant
               AND all(edge IN child_of WHERE edge.tenant = $tenant)
-              AND toLower(matched.label) CONTAINS $query
-              AND coalesce(f.deleted, false) = false
-              AND coalesce(matched.deleted, false) = false
+              AND (
+                toLower(matched.label) CONTAINS $query
+                OR toLower(coalesce(matched.description, '')) CONTAINS $query
+              )
+              AND coalesce(f.projection_state, 'reference') <> 'deleted'
+              AND coalesce(matched.projection_state, 'reference') <> 'deleted'
               {scoped}
             RETURN d, 1.0 AS confidence
             """,
@@ -290,8 +307,11 @@ def _graph_search_queries() -> tuple[tuple[str, str], ...]:
             """
             MATCH (matched:Folder)
             WHERE matched.tenant = $tenant
-              AND toLower(matched.label) CONTAINS $query
-              AND coalesce(matched.deleted, false) = false
+              AND (
+                toLower(matched.label) CONTAINS $query
+                OR toLower(coalesce(matched.description, '')) CONTAINS $query
+              )
+              AND coalesce(matched.projection_state, 'reference') <> 'deleted'
             MATCH (matched)-[matched_child_of:CHILD_OF]->(parent:Folder)
                   <-[sibling_child_of:CHILD_OF]-(sibling:Folder)
             MATCH (d:Document)-[in_folder:IN_FOLDER]->(sibling)
@@ -301,8 +321,8 @@ def _graph_search_queries() -> tuple[tuple[str, str], ...]:
               AND matched_child_of.tenant = $tenant
               AND sibling_child_of.tenant = $tenant
               AND in_folder.tenant = $tenant
-              AND coalesce(parent.deleted, false) = false
-              AND coalesce(sibling.deleted, false) = false
+              AND coalesce(parent.projection_state, 'reference') <> 'deleted'
+              AND coalesce(sibling.projection_state, 'reference') <> 'deleted'
               AND ($document_ids = [] OR d.document_id IN $document_ids)
             RETURN d, 1.0 AS confidence
             """,
@@ -330,9 +350,22 @@ def _folders_from_records(value: object) -> tuple[RetrievedFolder, ...]:
                 source_version=source_version,
                 created_at=_record_text(item, "created_at"),
                 updated_at=_record_text(item, "updated_at"),
+                name=_record_text(item, "name"),
+                path=_record_optional_text(item, "path_snapshot"),
+                description=_record_text(item, "description"),
             )
         )
     return tuple(folders)
+
+
+def _record_optional_text(item: dict[str, object], key: str) -> str | None:
+    value = item.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _record_text(

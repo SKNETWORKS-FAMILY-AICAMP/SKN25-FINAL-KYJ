@@ -70,6 +70,9 @@ class RetrievedFolder:
     source_version: str
     created_at: str = ""
     updated_at: str = ""
+    name: str = ""
+    path: str | None = None
+    description: str = ""
 
 
 @dataclass(frozen=True, slots=True)

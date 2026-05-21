@@ -216,7 +216,9 @@ class PostgresAdapterTests(unittest.TestCase):
         )
 
         sql = _all_sql(connection)
+        self.assertIn("setweight(ds.title_search_vector, 'A')", sql)
         self.assertIn("dc.search_vector @@ plainto_tsquery('simple', %s)", sql)
+        self.assertIn("ds.title_search_vector @@ plainto_tsquery('simple', %s)", sql)
         self.assertIn("source_document_folder_relations", sql)
         self.assertEqual(results[0].chunk.text, "A useful document.")
         self.assertEqual(results[0].chunk.start_offset, 0)
@@ -227,6 +229,7 @@ class PostgresAdapterTests(unittest.TestCase):
             (
                 "useful document",
                 "tenant-1",
+                "useful document",
                 "useful document",
                 ["doc-1"],
                 ["folder-1"],
@@ -247,7 +250,8 @@ class PostgresAdapterTests(unittest.TestCase):
         )
 
         self.assertIn("title", _all_sql(connection))
-        self.assertIn("index_input_digest", _all_sql(connection))
+        self.assertIn("document_index_input_digest", _all_sql(connection))
+        self.assertIn("document_signal_input_digest", _all_sql(connection))
         self.assertIn("generation_model", _all_sql(connection))
         self.assertIn("signal_generation_version", _all_sql(connection))
         self.assertIn("document_sources", _all_sql(connection))
@@ -428,10 +432,12 @@ class PostgresAdapterTests(unittest.TestCase):
                 [("tenant-1", "doc-1")],
                 [("folder-1",), ("folder-2",)],
                 [("tenant-1",)],
+                [("1",)],
                 [("folder-v1", "Folder 1", None, None, "", {})],
                 [],
                 [("tenant-1", "folder-1", "folder-signal-input-v1", "1")],
                 [("tenant-1",)],
+                [("1",)],
                 [("folder-v1", "Folder 2", None, None, "", {})],
                 [],
                 [("tenant-1", "folder-2", "folder-signal-input-v1", "1")],
@@ -465,15 +471,30 @@ class PostgresAdapterTests(unittest.TestCase):
                 (["folder-1", "folder-2"],),
             ],
         )
-        self.assertEqual(params[3][0], "folder-1")
-        self.assertEqual(params[6][1], "folder-1")
-        self.assertEqual(params[7][0], "folder-2")
-        self.assertEqual(params[10][1], "folder-2")
+        self.assertEqual(
+            [
+                (invalidation.folder_id, invalidation.signal_generation_version)
+                for invalidation in deleted.folder_signal_invalidations
+            ],
+            [("folder-1", "1"), ("folder-2", "1")],
+        )
+        self.assertTrue(
+            any(
+                len(call_params) == 3 and call_params[2] == "folder-1"
+                for call_params in params
+            )
+        )
+        self.assertTrue(
+            any(
+                len(call_params) == 3 and call_params[2] == "folder-2"
+                for call_params in params
+            )
+        )
         self.assertEqual(
             params[-5:],
             [
                 ("doc-1",),
-                ("doc-1",),
+                ("tenant-1", "doc-1"),
                 ("doc-1",),
                 ("doc-1",),
                 ("tenant-1", "doc-1"),
@@ -595,7 +616,8 @@ class PostgresAdapterTests(unittest.TestCase):
                 document_id="doc-1",
                 source_version="v1",
                 content_digest="content-digest-1",
-                index_input_digest="index-input-v1",
+                source_input_digest="source-input-v1",
+                vector_input_digest="vector-input-v1",
                 created_at="2026-05-01T10:00:00+09:00",
                 updated_at="2026-05-02T11:00:00+09:00",
                 embedding_input="Architecture memo",
@@ -626,11 +648,14 @@ class PostgresAdapterTests(unittest.TestCase):
         self.assertNotIn("payload_digest", sql)
         self.assertNotIn("projected_at", sql)
         self.assertIn(
-            "ON CONFLICT (collection_name, point_id)",
+            "source_kind,",
             sql,
         )
-        self.assertIn("source_kind = EXCLUDED.source_kind", sql)
-        self.assertIn("vector_item_id = EXCLUDED.vector_item_id", sql)
+        self.assertIn("vector_item_id", sql)
+        self.assertIn("point_id = EXCLUDED.point_id", sql)
+        self.assertIn("source_input_digest = EXCLUDED.source_input_digest", sql)
+        self.assertIn("vector_input_digest = EXCLUDED.vector_input_digest", sql)
+        self.assertNotIn("ON CONFLICT (collection_name, point_id)", sql)
         self.assertNotIn("document_index_id", sql)
         self.assertEqual(
             connection.calls[-1][1][0:4],
@@ -643,7 +668,7 @@ class PostgresAdapterTests(unittest.TestCase):
         )
         self.assertEqual(
             connection.calls[-1][1][4:],
-            ("doc-1", "document", "doc-1", "index-input-v1"),
+            ("doc-1", "document", "doc-1", "source-input-v1", "vector-input-v1"),
         )
 
     def test_projection_ledger_deletes_document_projections_by_document_id(
@@ -666,6 +691,10 @@ class PostgresAdapterTests(unittest.TestCase):
         repository.delete_folder_signal_vector_records(
             folder_id="folder-1",
         )
+        repository.delete_stale_folder_signal_vector_records(
+            folder_id="folder-1",
+            current_source_input_digest="folder-signal-input-v2",
+        )
 
         self.assertEqual(
             [params for _, params in connection.calls],
@@ -674,9 +703,11 @@ class PostgresAdapterTests(unittest.TestCase):
                 ("document", "doc-1", ["chunk"]),
                 ("document", "doc-1", ["signal"]),
                 ("folder", "folder-1", ["signal"]),
+                ("folder-1", "folder-signal-input-v2"),
             ],
         )
         self.assertIn("DELETE FROM vector_projection_records", _all_sql(connection))
+        self.assertIn("source_input_digest <> %s", _all_sql(connection))
         self.assertNotIn("SET deleted_at", _all_sql(connection))
 
     def test_outbox_repository_appends_event_with_debezium_key_fields(self) -> None:
@@ -1123,7 +1154,8 @@ def _sample_document_profile() -> DocumentProfile:
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         title="Architecture memo",
-        index_input_digest="index-input-v1",
+        document_index_input_digest="index-input-v1",
+        document_signal_input_digest="index-input-v1",
         metadata={"source": "test"},
     )
 
@@ -1172,7 +1204,7 @@ def _sample_document_chunk() -> DocumentChunk:
         document_type="document",
         document_id="doc-1",
         source_version="v1",
-        index_input_digest="index-input-v1",
+        document_index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id="11111111-1111-4111-8111-111111111111",
@@ -1194,7 +1226,7 @@ def _sample_document_signal() -> DocumentSignal:
         document_type="document",
         document_id="doc-1",
         source_version="v1",
-        index_input_digest="index-input-v1",
+        document_signal_input_digest="index-input-v1",
         signal_type=DocumentSignalType.SUMMARY,
         text="A useful document.",
         attributes={},

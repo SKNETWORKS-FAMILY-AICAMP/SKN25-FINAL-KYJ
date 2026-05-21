@@ -41,7 +41,7 @@ class QdrantFolderVectorStore:
                 self.client.collection_name,
                 "folder",
                 projection.folder_id,
-                projection.index_input_digest,
+                projection.vector_input_digest,
             ),
         )
         self.delete_folder_vector(folder_id=projection.folder_id)

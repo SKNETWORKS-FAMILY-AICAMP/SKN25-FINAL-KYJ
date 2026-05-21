@@ -13,6 +13,9 @@ class Neo4jDocumentNodeRecord:
     created_at: str
     updated_at: str
     label: str | None = None
+    document_index_input_digest: str | None = None
+    document_signal_input_digest: str | None = None
+    signal_generation_version: str | None = None
     metadata_json: str = "{}"
 
 
@@ -24,8 +27,10 @@ class Neo4jFolderNodeRecord:
     source_version: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    projection_state: str = "reference"
     path_snapshot: str | None = None
     parent_folder_id: str | None = None
+    description: str = ""
     metadata_json: str = "{}"
 
 
@@ -46,9 +51,13 @@ class Neo4jDocumentSignalNodeRecord:
     document_id: str
     source_version: str
     content_digest: str
-    index_input_digest: str = ""
+    document_signal_input_digest: str = ""
+    signal_generation_version: str = "1"
     attributes_json: str = "{}"
+    evidence_json: str = "[]"
     confidence: float | None = None
+    extractor_name: str = ""
+    extractor_version: str = ""
     generation_model: str | None = None
     metadata_json: str = "{}"
 
@@ -59,12 +68,16 @@ class Neo4jFolderSignalNodeRecord:
     tenant: str
     folder_id: str
     source_version: str
-    index_input_digest: str
+    folder_signal_input_digest: str
+    signal_generation_version: str
     signal_type: str
     signal_key: str
     text: str
     related_document_id: str | None = None
     attributes_json: str = "{}"
+    evidence_json: str = "[]"
     confidence: float | None = None
+    extractor_name: str = ""
+    extractor_version: str = ""
     generation_model: str | None = None
     metadata_json: str = "{}"

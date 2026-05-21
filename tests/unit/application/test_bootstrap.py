@@ -97,7 +97,7 @@ def make_chunk(chunk_id: str, text: str) -> DocumentChunk:
         document_type="document",
         document_id="doc-1",
         source_version="v1",
-        index_input_digest="index-input-v1",
+        document_index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id=chunk_id,
@@ -259,9 +259,9 @@ class FakeSignalVectorStore:
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
-        self.deleted.append(f"{folder_id}@!={current_index_input_digest}")
+        self.deleted.append(f"{folder_id}@!={current_folder_signal_input_digest}")
 
     def search_signals(self, **kwargs: object) -> list[object]:
         return []
@@ -319,9 +319,9 @@ class FakeGraphStore:
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
-        self.deleted_folder_signals.append(f"{folder_id}@!={current_index_input_digest}")
+        self.deleted_folder_signals.append(f"{folder_id}@!={current_folder_signal_input_digest}")
 
     def delete_folder(self, *, folder_id: str) -> None:
         self.deleted_folders.append(folder_id)
@@ -528,7 +528,7 @@ class FakeIndexingTransaction:
     ) -> FolderIndexChange:
         return FolderIndexChange(applied=True)
 
-    def current_folder_index_input_digest(self, *, tenant: str, folder_id: str) -> str | None:
+    def current_folder_signal_input_digest(self, *, tenant: str, folder_id: str) -> str | None:
         return "folder-signal-input-v1"
 
     def replace_folder_signals(
@@ -536,12 +536,12 @@ class FakeIndexingTransaction:
         *,
         folder: object,
         signals: tuple[object, ...],
-        expected_index_input_digest: str,
+        expected_folder_signal_input_digest: str,
         signal_generation_version: str = "1",
     ) -> FolderSignalRefreshCommit:
         return FolderSignalRefreshCommit(
             applied=True,
-            index_input_digest=expected_index_input_digest,
+            folder_signal_input_digest=expected_folder_signal_input_digest,
         )
 
     def mark_folder_deleted(self, *, folder_id: str) -> DeletedFolderIdentity:

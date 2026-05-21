@@ -157,7 +157,7 @@ class Neo4jGraphStore:
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
         with self.client.session() as session:
             _execute_write(
@@ -165,7 +165,7 @@ class Neo4jGraphStore:
                 lambda tx: delete_stale_folder_signal_projection(
                     tx,
                     folder_id=folder_id,
-                    current_index_input_digest=current_index_input_digest,
+                    current_folder_signal_input_digest=current_folder_signal_input_digest,
                 ),
             )
 

@@ -15,6 +15,7 @@ from foldmind_ai_core.core.domain.models.profiling import (
     SignalEvidence,
 )
 from foldmind_ai_core.core.domain.services.confidence import normalize_confidence_value
+from foldmind_ai_core.shared.input_digest import input_digest
 from foldmind_ai_core.shared.types import JsonObject, Metadata
 from foldmind_ai_core.shared.validation import InvalidInputError
 
@@ -46,6 +47,22 @@ DEFAULT_SIGNAL_DEFINITIONS = SignalDefinitionRegistry(
         DocumentSignalType.CLAIM,
     )
 )
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentSignalInput:
+    document_index_input_digest: str
+    signal_generation_version: str
+
+    @property
+    def digest(self) -> str:
+        return input_digest(
+            "document_signal",
+            {
+                "document_index_input_digest": self.document_index_input_digest,
+                "signal_generation_version": self.signal_generation_version,
+            },
+        )
 
 
 def document_signal_type(value: DocumentSignalType | str) -> DocumentSignalType:
@@ -99,14 +116,19 @@ def document_signal_id(
     *,
     tenant: str,
     document_id: str,
-    index_input_digest: str,
+    document_signal_input_digest: str,
     signal_type: DocumentSignalType | str,
     signal_key: str,
+    signal_generation_version: str = "1",
 ) -> str:
     parts = (
         _required_text(tenant, "tenant"),
         _required_text(document_id, "document_id"),
-        _required_text(index_input_digest, "index_input_digest"),
+        _required_text(
+            document_signal_input_digest,
+            "document_signal_input_digest",
+        ),
+        _required_text(signal_generation_version, "signal_generation_version"),
         DEFAULT_SIGNAL_DEFINITIONS.require(signal_type).value,
         _required_text(signal_key, "signal_key"),
     )
@@ -120,7 +142,7 @@ def create_document_signal(
     document_type: str | None,
     document_id: str,
     source_version: str,
-    index_input_digest: str,
+    document_signal_input_digest: str,
     signal_type: DocumentSignalType | str,
     text: str,
     attributes: JsonObject | None,
@@ -128,6 +150,7 @@ def create_document_signal(
     confidence: Confidence | float | None,
     extractor_name: str,
     extractor_version: str,
+    signal_generation_version: str = "1",
     generation_model: str | None = None,
     metadata: Metadata | None = None,
 ) -> DocumentSignal:
@@ -149,7 +172,8 @@ def create_document_signal(
         signal_id=document_signal_id(
             tenant=tenant,
             document_id=document_id,
-            index_input_digest=index_input_digest,
+            document_signal_input_digest=document_signal_input_digest,
+            signal_generation_version=signal_generation_version,
             signal_type=resolved_type,
             signal_key=signal_key,
         ),
@@ -157,7 +181,14 @@ def create_document_signal(
         document_type=document_type,
         document_id=document_id,
         source_version=source_version,
-        index_input_digest=_required_text(index_input_digest, "index_input_digest"),
+        document_signal_input_digest=_required_text(
+            document_signal_input_digest,
+            "document_signal_input_digest",
+        ),
+        signal_generation_version=_required_text(
+            signal_generation_version,
+            "signal_generation_version",
+        ),
         signal_type=resolved_type,
         signal_key=signal_key,
         text=clean_text,
@@ -175,15 +206,17 @@ def folder_signal_id(
     *,
     tenant: str,
     folder_id: str,
-    index_input_digest: str,
+    folder_signal_input_digest: str,
     signal_type: FolderSignalType | str,
     signal_key: str,
     related_document_id: str | None = None,
+    signal_generation_version: str = "1",
 ) -> str:
     parts = (
         _required_text(tenant, "tenant"),
         _required_text(folder_id, "folder_id"),
-        _required_text(index_input_digest, "index_input_digest"),
+        _required_text(folder_signal_input_digest, "folder_signal_input_digest"),
+        _required_text(signal_generation_version, "signal_generation_version"),
         folder_signal_type(signal_type).value,
         _required_text(signal_key, "signal_key"),
         related_document_id.strip() if related_document_id else "",
@@ -197,6 +230,7 @@ def create_folder_signal(
     tenant: str,
     folder_id: str,
     source_version: str,
+    folder_signal_input_digest: str,
     signal_type: FolderSignalType | str,
     signal_key: str,
     text: str,
@@ -208,7 +242,7 @@ def create_folder_signal(
     extractor_version: str,
     generation_model: str | None = None,
     metadata: Metadata | None = None,
-    index_input_digest: str,
+    signal_generation_version: str = "1",
 ) -> FolderSignal:
     resolved_type = folder_signal_type(signal_type)
     clean_key = _required_text(signal_key, "signal_key")
@@ -224,7 +258,8 @@ def create_folder_signal(
         signal_id=folder_signal_id(
             tenant=tenant,
             folder_id=folder_id,
-            index_input_digest=index_input_digest,
+            folder_signal_input_digest=folder_signal_input_digest,
+            signal_generation_version=signal_generation_version,
             signal_type=resolved_type,
             signal_key=clean_key,
             related_document_id=clean_related_document_id,
@@ -232,6 +267,14 @@ def create_folder_signal(
         tenant=_required_text(tenant, "tenant"),
         folder_id=_required_text(folder_id, "folder_id"),
         source_version=_required_text(source_version, "source_version"),
+        folder_signal_input_digest=_required_text(
+            folder_signal_input_digest,
+            "folder_signal_input_digest",
+        ),
+        signal_generation_version=_required_text(
+            signal_generation_version,
+            "signal_generation_version",
+        ),
         signal_type=resolved_type,
         signal_key=clean_key,
         text=clean_text,
@@ -243,7 +286,6 @@ def create_folder_signal(
         extractor_version=extractor_version.strip(),
         generation_model=_optional_text(generation_model, "generation_model"),
         metadata=dict(metadata or {}),
-        index_input_digest=_required_text(index_input_digest, "index_input_digest"),
     )
 
 

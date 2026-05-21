@@ -21,7 +21,7 @@ class DeletedFolderIdentity:
 class FolderSignalInvalidation:
     tenant: str
     folder_id: str
-    index_input_digest: str
+    folder_signal_input_digest: str
     signal_generation_version: str = "1"
 
 
@@ -40,7 +40,7 @@ class FolderIndexChange:
 @dataclass(frozen=True, slots=True)
 class FolderSignalRefreshCommit:
     applied: bool
-    index_input_digest: str
+    folder_signal_input_digest: str
 
 
 @dataclass(frozen=True, slots=True)

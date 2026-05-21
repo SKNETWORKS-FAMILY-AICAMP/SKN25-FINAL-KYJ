@@ -8,7 +8,8 @@ from foldmind_ai_core.shared.types import JsonObject
 @dataclass(frozen=True, slots=True)
 class PostgresDocumentSignalRecord:
     signal_id: str
-    index_input_digest: str
+    document_signal_input_digest: str
+    signal_generation_version: str
     signal_type: str
     signal_key: str
     text: str
@@ -24,7 +25,8 @@ class PostgresDocumentSignalRecord:
 class PostgresFolderSignalRecord:
     signal_id: str
     folder_id: str
-    index_input_digest: str
+    folder_signal_input_digest: str
+    signal_generation_version: str
     signal_type: str
     signal_key: str
     text: str

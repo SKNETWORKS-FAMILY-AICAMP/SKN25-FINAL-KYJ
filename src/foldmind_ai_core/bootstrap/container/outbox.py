@@ -235,6 +235,8 @@ def _build_signal_vector_dispatcher(
         folder_signals_invalidated=FolderSignalVectorsInvalidatedConsumer(
             use_case=InvalidateFolderSignalVectorsUseCase(
                 signal_vectors=signal_vectors,
+                projection_ledger=projection_ledger,
+                source_freshness=source_freshness,
             ),
         ),
         folder_deleted=FolderSignalVectorsDeletedConsumer(

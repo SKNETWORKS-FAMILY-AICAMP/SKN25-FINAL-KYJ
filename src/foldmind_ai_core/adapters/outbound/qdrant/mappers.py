@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from typing import Any, cast
 
@@ -47,16 +48,15 @@ def chunk_payload(chunk: DocumentChunkVectorProjection) -> JsonObject:
             document_id=chunk.document_id,
             source_version=chunk.source_version,
             content_digest=chunk.content_digest,
-            index_input_digest=chunk.index_input_digest,
+            source_input_digest=chunk.source_input_digest,
+            vector_input_digest=chunk.vector_input_digest,
             created_at=chunk.created_at,
             updated_at=chunk.updated_at,
             chunk_id=chunk.chunk_id,
-            text=chunk.text,
-            text_hash=chunk.text_hash,
+            search_text=chunk.text,
             chunk_index=chunk.chunk_index,
-            chunking_version=chunk.chunking_version,
-            start_offset=chunk.start_offset,
-            end_offset=chunk.end_offset,
+            source_start_offset=chunk.start_offset,
+            source_end_offset=chunk.end_offset,
             embedding_model=chunk.embedding_model,
             embedding_version=chunk.embedding_version,
             index_schema_version=chunk.index_schema_version,
@@ -73,13 +73,15 @@ def document_payload(document: DocumentVectorProjection) -> JsonObject:
             document_id=document.document_id,
             source_version=document.source_version,
             content_digest=document.content_digest,
-            index_input_digest=document.index_input_digest,
+            source_input_digest=document.source_input_digest,
+            vector_input_digest=document.vector_input_digest,
             created_at=document.created_at,
             updated_at=document.updated_at,
             embedding_input_hash=document.embedding_input_hash,
             embedding_model=document.embedding_model,
             embedding_version=document.embedding_version,
             index_schema_version=document.index_schema_version,
+            title=document.title,
         )
     )
 
@@ -106,7 +108,9 @@ def _document_signal_payload(signal: DocumentSignalVectorProjection) -> JsonObje
             text=signal.embedding_input,
             source_version=signal.source_version,
             content_digest=signal.content_digest,
-            index_input_digest=signal.index_input_digest,
+            source_input_digest=signal.source_input_digest,
+            vector_input_digest=signal.vector_input_digest,
+            signal_generation_version=signal.signal_generation_version,
             related_document_id=None,
             attributes=dict(signal.attributes),
             evidence=tuple(
@@ -124,6 +128,9 @@ def _document_signal_payload(signal: DocumentSignalVectorProjection) -> JsonObje
             embedding_model=signal.embedding_model,
             embedding_version=signal.embedding_version,
             index_schema_version=signal.index_schema_version,
+            extractor_name=signal.extractor_name,
+            extractor_version=signal.extractor_version,
+            generation_model=signal.generation_model,
             metadata=dict(signal.metadata),
         )
     )
@@ -143,7 +150,9 @@ def _folder_signal_payload(signal: FolderSignalVectorProjection) -> JsonObject:
             text=signal.embedding_input,
             source_version=signal.source_version,
             content_digest=None,
-            index_input_digest=signal.index_input_digest,
+            source_input_digest=signal.source_input_digest,
+            vector_input_digest=signal.vector_input_digest,
+            signal_generation_version=signal.signal_generation_version,
             related_document_id=signal.related_document_id,
             attributes=dict(signal.attributes),
             evidence=tuple(dict(item) for item in signal.evidence),
@@ -152,6 +161,9 @@ def _folder_signal_payload(signal: FolderSignalVectorProjection) -> JsonObject:
             embedding_model=signal.embedding_model,
             embedding_version=signal.embedding_version,
             index_schema_version=signal.index_schema_version,
+            extractor_name=signal.extractor_name,
+            extractor_version=signal.extractor_version,
+            generation_model=signal.generation_model,
             metadata=dict(signal.metadata),
         )
     )
@@ -163,13 +175,17 @@ def folder_payload(folder: FolderVectorProjection) -> JsonObject:
             tenant=folder.tenant,
             folder_id=folder.folder_id,
             source_version=folder.source_version,
-            index_input_digest=folder.index_input_digest,
+            source_input_digest=folder.source_input_digest,
+            vector_input_digest=folder.vector_input_digest,
             created_at=folder.created_at,
             updated_at=folder.updated_at,
             embedding_input_hash=folder.embedding_input_hash,
             embedding_model=folder.embedding_model,
             embedding_version=folder.embedding_version,
             index_schema_version=folder.index_schema_version,
+            name=folder.name,
+            path=folder.path,
+            description=folder.description,
         )
     )
 
@@ -181,16 +197,16 @@ def chunk_from_payload(payload: JsonObject) -> DocumentChunk:
         document_type=record.document_type,
         document_id=record.document_id,
         source_version=record.source_version,
-        index_input_digest=record.index_input_digest,
+        document_index_input_digest=record.source_input_digest,
         created_at=record.created_at,
         updated_at=record.updated_at,
         chunk_id=record.chunk_id,
         chunk_index=record.chunk_index,
-        chunking_version=record.chunking_version,
-        text=record.text,
-        text_hash=record.text_hash,
-        start_offset=record.start_offset,
-        end_offset=record.end_offset,
+        chunking_version="",
+        text=record.search_text,
+        text_hash=hashlib.sha256(record.search_text.encode("utf-8")).hexdigest(),
+        start_offset=record.source_start_offset,
+        end_offset=record.source_end_offset,
         embedding_model=record.embedding_model,
         embedding_version=record.embedding_version,
         index_schema_version=record.index_schema_version,
@@ -207,6 +223,7 @@ def document_from_payload(payload: JsonObject) -> RetrievedDocument:
         source_version=record.source_version,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        snippet=record.title,
     )
 
 
@@ -238,6 +255,9 @@ def folder_from_payload(payload: JsonObject) -> RetrievedFolder:
         source_version=record.source_version,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        name=record.name,
+        path=record.path,
+        description=record.description,
     )
 
 
@@ -249,16 +269,15 @@ def document_chunk_payload_to_json(payload: QdrantDocumentChunkPayload) -> JsonO
         "document_id": payload.document_id,
         "source_version": payload.source_version,
         "content_digest": payload.content_digest,
-        "index_input_digest": payload.index_input_digest,
+        "source_input_digest": payload.source_input_digest,
+        "vector_input_digest": payload.vector_input_digest,
         "created_at": payload.created_at,
         "updated_at": payload.updated_at,
         "chunk_id": payload.chunk_id,
-        "text": payload.text,
-        "text_hash": payload.text_hash,
+        "search_text": payload.search_text,
         "chunk_index": payload.chunk_index,
-        "chunking_version": payload.chunking_version,
-        "start_offset": payload.start_offset,
-        "end_offset": payload.end_offset,
+        "source_start_offset": payload.source_start_offset,
+        "source_end_offset": payload.source_end_offset,
         "metadata": dict(payload.metadata),
         "embedding_model": payload.embedding_model,
         "embedding_version": payload.embedding_version,
@@ -274,9 +293,11 @@ def document_payload_to_json(payload: QdrantDocumentPayload) -> JsonObject:
         "document_id": payload.document_id,
         "source_version": payload.source_version,
         "content_digest": payload.content_digest,
-        "index_input_digest": payload.index_input_digest,
+        "source_input_digest": payload.source_input_digest,
+        "vector_input_digest": payload.vector_input_digest,
         "created_at": payload.created_at,
         "updated_at": payload.updated_at,
+        "title": payload.title,
         "embedding_input_hash": payload.embedding_input_hash,
         "embedding_model": payload.embedding_model,
         "embedding_version": payload.embedding_version,
@@ -298,7 +319,9 @@ def signal_payload_to_json(payload: QdrantSignalPayload) -> JsonObject:
         "text": payload.text,
         "source_version": payload.source_version,
         "content_digest": payload.content_digest,
-        "index_input_digest": payload.index_input_digest,
+        "source_input_digest": payload.source_input_digest,
+        "vector_input_digest": payload.vector_input_digest,
+        "signal_generation_version": payload.signal_generation_version,
         "related_document_id": payload.related_document_id,
         "attributes": dict(payload.attributes),
         "evidence": list(payload.evidence),
@@ -307,6 +330,9 @@ def signal_payload_to_json(payload: QdrantSignalPayload) -> JsonObject:
         "embedding_model": payload.embedding_model,
         "embedding_version": payload.embedding_version,
         "index_schema_version": payload.index_schema_version,
+        "extractor_name": payload.extractor_name,
+        "extractor_version": payload.extractor_version,
+        "generation_model": payload.generation_model,
         "metadata": dict(payload.metadata),
     }
 
@@ -317,9 +343,13 @@ def folder_payload_to_json(payload: QdrantFolderPayload) -> JsonObject:
         "tenant": payload.tenant,
         "folder_id": payload.folder_id,
         "source_version": payload.source_version,
-        "index_input_digest": payload.index_input_digest,
+        "source_input_digest": payload.source_input_digest,
+        "vector_input_digest": payload.vector_input_digest,
         "created_at": payload.created_at,
         "updated_at": payload.updated_at,
+        "name": payload.name,
+        "path": payload.path,
+        "description": payload.description,
         "embedding_model": payload.embedding_model,
         "embedding_version": payload.embedding_version,
         "index_schema_version": payload.index_schema_version,
@@ -336,16 +366,15 @@ def document_chunk_payload_from_json(
         document_id=_required_text(payload, "document_id"),
         source_version=_optional_text(payload, "source_version"),
         content_digest=_optional_text(payload, "content_digest"),
-        index_input_digest=_optional_text(payload, "index_input_digest"),
+        source_input_digest=_optional_text(payload, "source_input_digest"),
+        vector_input_digest=_optional_text(payload, "vector_input_digest"),
         created_at=_required_text(payload, "created_at"),
         updated_at=_required_text(payload, "updated_at"),
         chunk_id=_required_text(payload, "chunk_id"),
         chunk_index=_required_int(payload, "chunk_index"),
-        chunking_version=_optional_text(payload, "chunking_version"),
-        text=_required_content_text(payload, "text"),
-        text_hash=_optional_text(payload, "text_hash"),
-        start_offset=_required_int(payload, "start_offset"),
-        end_offset=_required_int(payload, "end_offset"),
+        search_text=_required_content_text(payload, "search_text"),
+        source_start_offset=_required_int(payload, "source_start_offset"),
+        source_end_offset=_required_int(payload, "source_end_offset"),
         embedding_model=_optional_text(payload, "embedding_model"),
         embedding_version=_optional_text(payload, "embedding_version"),
         index_schema_version=_optional_text(payload, "index_schema_version"),
@@ -360,13 +389,15 @@ def document_payload_from_json(payload: JsonObject) -> QdrantDocumentPayload:
         document_id=_required_text(payload, "document_id"),
         source_version=_optional_text(payload, "source_version"),
         content_digest=_optional_text(payload, "content_digest"),
-        index_input_digest=_optional_text(payload, "index_input_digest"),
+        source_input_digest=_optional_text(payload, "source_input_digest"),
+        vector_input_digest=_optional_text(payload, "vector_input_digest"),
         created_at=_required_text(payload, "created_at"),
         updated_at=_required_text(payload, "updated_at"),
         embedding_input_hash=_optional_text(payload, "embedding_input_hash"),
         embedding_model=_optional_text(payload, "embedding_model"),
         embedding_version=_optional_text(payload, "embedding_version"),
         index_schema_version=_optional_text(payload, "index_schema_version"),
+        title=_optional_content_text(payload.get("title")) or "",
     )
 
 
@@ -384,7 +415,9 @@ def signal_payload_from_json(payload: JsonObject) -> QdrantSignalPayload:
         text=_required_content_text(payload, "text"),
         source_version=_optional_text(payload, "source_version"),
         content_digest=_optional_str(payload, "content_digest"),
-        index_input_digest=_optional_text(payload, "index_input_digest"),
+        source_input_digest=_optional_text(payload, "source_input_digest"),
+        vector_input_digest=_optional_text(payload, "vector_input_digest"),
+        signal_generation_version=_optional_text(payload, "signal_generation_version"),
         related_document_id=_optional_str(payload, "related_document_id"),
         attributes=_metadata_json(payload.get("attributes")),
         evidence=tuple(
@@ -396,6 +429,9 @@ def signal_payload_from_json(payload: JsonObject) -> QdrantSignalPayload:
         embedding_model=_optional_text(payload, "embedding_model"),
         embedding_version=_optional_text(payload, "embedding_version"),
         index_schema_version=_optional_text(payload, "index_schema_version"),
+        extractor_name=_optional_text(payload, "extractor_name"),
+        extractor_version=_optional_text(payload, "extractor_version"),
+        generation_model=_optional_str(payload, "generation_model"),
         metadata=_metadata_json(payload.get("metadata")),
     )
 
@@ -435,13 +471,17 @@ def folder_payload_from_json(payload: JsonObject) -> QdrantFolderPayload:
         tenant=_required_text(payload, "tenant"),
         folder_id=_required_text(payload, "folder_id"),
         source_version=_optional_text(payload, "source_version"),
-        index_input_digest=_optional_text(payload, "index_input_digest"),
+        source_input_digest=_optional_text(payload, "source_input_digest"),
+        vector_input_digest=_optional_text(payload, "vector_input_digest"),
         created_at=_required_text(payload, "created_at"),
         updated_at=_required_text(payload, "updated_at"),
         embedding_input_hash=_optional_text(payload, "embedding_input_hash"),
         embedding_model=_optional_text(payload, "embedding_model"),
         embedding_version=_optional_text(payload, "embedding_version"),
         index_schema_version=_optional_text(payload, "index_schema_version"),
+        name=_optional_content_text(payload.get("name")) or "",
+        path=_optional_content_text(payload.get("path")),
+        description=_optional_content_text(payload.get("description")) or "",
     )
 
 
@@ -491,6 +531,14 @@ def _optional_text(payload: JsonObject, key: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{key} must be a string.")
     return value.strip()
+
+
+def _optional_content_text(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("content text must be a string.")
+    return value
 
 
 def _required_int(payload: JsonObject, key: str) -> int:

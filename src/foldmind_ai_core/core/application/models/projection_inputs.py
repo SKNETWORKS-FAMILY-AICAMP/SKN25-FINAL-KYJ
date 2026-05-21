@@ -44,10 +44,11 @@ class ProjectionDocumentSignal:
     document_id: str
     source_version: str
     content_digest: str
-    index_input_digest: str
+    document_signal_input_digest: str
     signal_type: str
     signal_key: str
     text: str
+    signal_generation_version: str = "1"
     attributes: Metadata = field(default_factory=dict)
     evidence: tuple[ProjectionSignalEvidence, ...] = ()
     confidence: float | None = None
@@ -72,7 +73,8 @@ class ProjectionFolderSignal:
     confidence: float | None = None
     extractor_name: str = ""
     extractor_version: str = ""
-    index_input_digest: str = ""
+    folder_signal_input_digest: str = ""
+    signal_generation_version: str = "1"
     metadata: Metadata = field(default_factory=dict)
     generation_model: str | None = None
 
@@ -84,7 +86,8 @@ class ProjectionDocumentProfile:
     document_id: str
     source_version: str
     content_digest: str
-    index_input_digest: str
+    document_index_input_digest: str
+    document_signal_input_digest: str
     created_at: str
     updated_at: str
     title: str

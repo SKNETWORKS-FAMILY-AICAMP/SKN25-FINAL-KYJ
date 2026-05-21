@@ -21,7 +21,7 @@ SELECT
     ds.document_type,
     dc.document_id,
     ds.source_version,
-    dc.index_input_digest,
+    dc.document_index_input_digest,
     ds.source_created_at,
     ds.source_updated_at,
     dc.chunk_id::text,
@@ -30,14 +30,21 @@ SELECT
     dc.source_start_offset,
     dc.source_end_offset,
     ds.metadata,
-    ts_rank_cd(dc.search_vector, plainto_tsquery('simple', %s)) AS score
+    ts_rank_cd(
+        setweight(ds.title_search_vector, 'A')
+        || setweight(dc.search_vector, 'B'),
+        plainto_tsquery('simple', %s)
+    ) AS score
 FROM document_chunks dc
 JOIN document_sources ds
   ON ds.tenant_id = dc.tenant_id
  AND ds.document_id = dc.document_id
 WHERE dc.tenant_id = %s
   AND ds.deleted_at IS NULL
-  AND dc.search_vector @@ plainto_tsquery('simple', %s)
+  AND (
+      ds.title_search_vector @@ plainto_tsquery('simple', %s)
+      OR dc.search_vector @@ plainto_tsquery('simple', %s)
+  )
 {scope_filters}
 ORDER BY score DESC, ds.source_updated_at DESC, dc.chunk_index ASC
 LIMIT %s
@@ -73,7 +80,7 @@ class PostgresDocumentKeywordSearchStore:
             return []
         scope_sql, scope_params = _scope_filters(scope)
         sql = _SEARCH_DOCUMENT_CHUNKS_SQL.format(scope_filters=scope_sql)
-        params = (query, tenant, query, *scope_params, top_k)
+        params = (query, tenant, query, query, *scope_params, top_k)
         with self.client.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [_retrieval_result_from_row(row) for row in rows]
@@ -153,7 +160,9 @@ def _retrieval_result_from_row(row: Any) -> RetrievalResult:
         document_type=_optional_text(row_value(row, "document_type", 1)),
         document_id=str(row_value(row, "document_id", 2)),
         source_version=str(row_value(row, "source_version", 3)),
-        index_input_digest=str(row_value(row, "index_input_digest", 4)),
+        document_index_input_digest=str(
+            row_value(row, "document_index_input_digest", 4)
+        ),
         created_at=str(row_value(row, "source_created_at", 5)),
         updated_at=str(row_value(row, "source_updated_at", 6)),
         chunk_id=str(row_value(row, "chunk_id", 7)),

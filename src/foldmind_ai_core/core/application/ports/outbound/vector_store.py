@@ -132,7 +132,7 @@ class SignalVectorStore(Protocol):
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
         """Delete stale folder signal vectors not matching the current digest."""
         ...

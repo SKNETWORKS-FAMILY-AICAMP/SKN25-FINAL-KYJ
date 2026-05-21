@@ -48,6 +48,21 @@ def document_node_from_neo4j(node: Any) -> Neo4jDocumentNodeRecord:
         created_at=_required_node_text(node, "created_at"),
         updated_at=_required_node_text(node, "updated_at"),
         label=_optional_node_text(node, "label", default="") or None,
+        document_index_input_digest=_optional_node_text(
+            node,
+            "document_index_input_digest",
+            default="",
+        ) or None,
+        document_signal_input_digest=_optional_node_text(
+            node,
+            "document_signal_input_digest",
+            default="",
+        ) or None,
+        signal_generation_version=_optional_node_text(
+            node,
+            "signal_generation_version",
+            default="",
+        ) or None,
         metadata_json=_optional_node_text(node, "metadata_json", default="{}"),
     )
 
@@ -78,6 +93,9 @@ def document_signal_node_from_projection(
         created_at=projection.created_at,
         updated_at=projection.updated_at,
         label=projection.title,
+        document_index_input_digest=projection.document_index_input_digest,
+        document_signal_input_digest=projection.document_signal_input_digest,
+        signal_generation_version=projection.signal_generation_version,
         metadata_json=json.dumps(projection.metadata, ensure_ascii=False),
     )
 
@@ -94,9 +112,13 @@ def document_signal_record_from_projection(
         document_id=signal.document_id,
         source_version=signal.source_version,
         content_digest=signal.content_digest,
-        index_input_digest=signal.index_input_digest,
+        document_signal_input_digest=signal.document_signal_input_digest,
+        signal_generation_version=signal.signal_generation_version,
         attributes_json=json.dumps(signal.attributes, ensure_ascii=False),
+        evidence_json=_document_signal_evidence_json(signal),
         confidence=signal.confidence,
+        extractor_name=signal.extractor_name,
+        extractor_version=signal.extractor_version,
         generation_model=signal.generation_model,
         metadata_json=json.dumps(signal.metadata, ensure_ascii=False),
     )
@@ -110,13 +132,17 @@ def folder_signal_record_from_projection(
         tenant=signal.tenant,
         folder_id=signal.folder_id,
         source_version=signal.source_version,
-        index_input_digest=signal.index_input_digest,
+        folder_signal_input_digest=signal.folder_signal_input_digest,
+        signal_generation_version=signal.signal_generation_version,
         signal_type=signal.signal_type,
         signal_key=signal.signal_key,
         text=signal.text,
         related_document_id=signal.related_document_id,
         attributes_json=json.dumps(signal.attributes, ensure_ascii=False),
+        evidence_json=json.dumps(signal.evidence, ensure_ascii=False),
         confidence=signal.confidence,
+        extractor_name=signal.extractor_name,
+        extractor_version=signal.extractor_version,
         generation_model=signal.generation_model,
         metadata_json=json.dumps(signal.metadata, ensure_ascii=False),
     )
@@ -132,13 +158,32 @@ def folder_node_from_projection(
         source_version=projection.source_version,
         created_at=projection.created_at,
         updated_at=projection.updated_at,
+        projection_state="active",
         path_snapshot=projection.path,
         parent_folder_id=projection.parent_folder_id,
+        description=projection.description,
+        metadata_json=json.dumps(projection.metadata, ensure_ascii=False),
     )
 
 
 def folder_reference_node(*, tenant: str, folder_id: str) -> Neo4jFolderNodeRecord:
     return Neo4jFolderNodeRecord(tenant=tenant, folder_id=folder_id)
+
+
+def _document_signal_evidence_json(signal: DocumentSignalNodeProjection) -> str:
+    return json.dumps(
+        tuple(
+            {
+                "chunk_id": item.chunk_id,
+                "quote": item.quote,
+                "start_offset": item.start_offset,
+                "end_offset": item.end_offset,
+                "metadata": dict(item.metadata),
+            }
+            for item in signal.evidence
+        ),
+        ensure_ascii=False,
+    )
 
 
 def signal_relationship(
@@ -154,7 +199,7 @@ def signal_relationship(
                 "signal_id": signal.signal_id,
                 "source_version": projection.source_version,
                 "content_digest": projection.content_digest,
-                "index_input_digest": projection.index_input_digest,
+                "document_signal_input_digest": projection.document_signal_input_digest,
                 "signal_generation_version": projection.signal_generation_version,
                 **projection.metadata,
             },
@@ -175,7 +220,8 @@ def folder_signal_relationship(
             {
                 "signal_id": signal.signal_id,
                 "source_version": projection.source_version,
-                "index_input_digest": projection.index_input_digest,
+                "folder_signal_input_digest": projection.folder_signal_input_digest,
+                "signal_generation_version": projection.signal_generation_version,
             },
             ensure_ascii=False,
         ),

@@ -32,11 +32,11 @@ class SourceFreshnessChecker(Protocol):
     ) -> bool:
         raise NotImplementedError
 
-    def is_current_folder_index_input_digest(
+    def is_current_folder_signal_input_digest(
         self,
         *,
         tenant: str,
         folder_id: str,
-        index_input_digest: str,
+        folder_signal_input_digest: str,
     ) -> bool:
         raise NotImplementedError

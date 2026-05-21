@@ -57,7 +57,9 @@
 - 폴더 signal은 폴더 자체의 상태뿐 아니라 현재 폴더 안에 어떤 문서들이 있는지도 입력으로 삼는다.
 - 따라서 문서가 수정되거나 이동되면 관련 폴더 signal은 낡은 것으로 보고 다시 평가 대상이 된다.
 - AI-Core는 낡은 folder signal이 검색, 추천, 정리에 섞이지 않도록 무효화한다.
-- 내부 구현에서는 문서 본문 identity를 `content_digest`로 저장하고, 파생 데이터 입력 기준을 `index_input_digest`로 저장한다.
+- 내부 구현에서는 문서 본문 identity를 `content_digest`로 저장하고, 파생 데이터 입력 기준은 파생물 종류별 digest로 저장한다.
+- 문서 chunk/search, 문서 signal, 폴더 source projection, folder-derived signal, vector projection은 서로 다른 입력을 가지므로 서로 다른 digest 이름을 사용한다.
+- Vector 저장소에는 원천 파생물의 입력 기준과 실제 embedding vector 생성 기준을 분리해서 기록한다.
 - Signal 생성 정책 버전은 `signal_generation_version`으로 저장하고, LLM 생성 결과의 provenance는 `generation_model`로 저장한다.
 
 ## 6. 분석 결과의 생명주기

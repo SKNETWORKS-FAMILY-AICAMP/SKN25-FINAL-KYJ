@@ -18,6 +18,7 @@ from foldmind_ai_core.core.application.models.indexing import (
     FolderSignalInvalidation,
     SourceDocumentFolderRelationSnapshot,
 )
+from foldmind_ai_core.core.application.projections.vector import VectorInput
 from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
 from foldmind_ai_core.core.domain.models.reference.folders import SourceFolder
 from foldmind_ai_core.core.domain.services.indexing import validate_document_indexed_context
@@ -127,7 +128,7 @@ def folder_signals_invalidated_event(
         payload={
             "tenant": invalidation.tenant,
             "folder_id": invalidation.folder_id,
-            "index_input_digest": invalidation.index_input_digest,
+            "folder_signal_input_digest": invalidation.folder_signal_input_digest,
             "signal_generation_version": invalidation.signal_generation_version,
         },
     )
@@ -136,7 +137,7 @@ def folder_signals_invalidated_event(
 def folder_signals_indexed_event(
     *,
     folder: SourceFolder,
-    index_input_digest: str,
+    folder_signal_input_digest: str,
     signal_generation_version: str,
     signals: tuple[FolderSignal, ...],
 ) -> OutboxEvent:
@@ -147,7 +148,7 @@ def folder_signals_indexed_event(
         event_type=str(OutboxEventType.FOLDER_SIGNALS_INDEXED),
         payload={
             "source_folder": source_folder_payload(folder),
-            "index_input_digest": index_input_digest,
+            "folder_signal_input_digest": folder_signal_input_digest,
             "signal_generation_version": signal_generation_version,
             "signals": [folder_signal_payload(signal) for signal in signals],
         },
@@ -233,16 +234,22 @@ def document_chunk_payload(
         "document_id": chunk.document_id,
         "source_version": chunk.source_version,
         "content_digest": content_digest,
-        "index_input_digest": chunk.index_input_digest,
+        "document_index_input_digest": chunk.document_index_input_digest,
+        "source_input_digest": chunk.document_index_input_digest,
+        "vector_input_digest": _vector_input_digest(
+            embedding_input=chunk.text,
+            embedding_model=chunk.embedding_model,
+            embedding_version=chunk.embedding_version,
+            vector_schema_version=chunk.index_schema_version,
+        ),
         "created_at": chunk.created_at,
         "updated_at": chunk.updated_at,
         "chunk_id": chunk.chunk_id,
         "chunk_index": chunk.chunk_index,
         "chunking_version": chunk.chunking_version,
-        "text": chunk.text,
-        "text_hash": chunk.text_hash,
-        "start_offset": chunk.start_offset,
-        "end_offset": chunk.end_offset,
+        "search_text": chunk.text,
+        "source_start_offset": chunk.start_offset,
+        "source_end_offset": chunk.end_offset,
         "embedding_model": chunk.embedding_model,
         "embedding_version": chunk.embedding_version,
         "index_schema_version": chunk.index_schema_version,
@@ -261,7 +268,8 @@ def document_profile_payload(
         "document_id": profile.document_id,
         "source_version": profile.source_version,
         "content_digest": content_digest,
-        "index_input_digest": profile.index_input_digest,
+        "document_index_input_digest": profile.document_index_input_digest,
+        "document_signal_input_digest": profile.document_signal_input_digest,
         "signal_generation_version": profile.signal_generation_version,
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
@@ -282,7 +290,8 @@ def document_signal_payload(
         "document_id": signal.document_id,
         "source_version": signal.source_version,
         "content_digest": content_digest,
-        "index_input_digest": signal.index_input_digest,
+        "document_signal_input_digest": signal.document_signal_input_digest,
+        "signal_generation_version": signal.signal_generation_version,
         "signal_type": str(signal.signal_type),
         "signal_key": signal.signal_key,
         "text": signal.text,
@@ -307,7 +316,8 @@ def folder_signal_payload(
         "tenant": signal.tenant,
         "folder_id": signal.folder_id,
         "source_version": signal.source_version,
-        "index_input_digest": signal.index_input_digest,
+        "folder_signal_input_digest": signal.folder_signal_input_digest,
+        "signal_generation_version": signal.signal_generation_version,
         "signal_type": str(signal.signal_type),
         "signal_key": signal.signal_key,
         "text": signal.text,
@@ -334,6 +344,21 @@ def signal_evidence_payload(evidence: SignalEvidence) -> JsonObject:
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _vector_input_digest(
+    *,
+    embedding_input: str,
+    embedding_model: str,
+    embedding_version: str,
+    vector_schema_version: str,
+) -> str:
+    return VectorInput(
+        embedding_input_hash=_sha256(embedding_input),
+        embedding_model=embedding_model,
+        embedding_version=embedding_version,
+        vector_schema_version=vector_schema_version,
+    ).digest
 
 
 def _utf8_size(value: str) -> int:

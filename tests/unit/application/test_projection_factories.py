@@ -67,9 +67,13 @@ class ProjectionFactoryTests(unittest.TestCase):
         projection = document_signal_graph_projection_from_profile(profile, signals)
 
         self.assertEqual(projection.document_id, "doc-1")
-        self.assertEqual(projection.index_input_digest, "index-input-v1")
+        self.assertEqual(projection.document_index_input_digest, "index-input-v1")
+        self.assertEqual(projection.document_signal_input_digest, "document-signal-input-v1")
         self.assertEqual(projection.signals[0].signal_type, "summary")
         self.assertEqual(projection.signals[1].signal_key, "startup")
+        self.assertEqual(projection.signals[0].evidence[0].quote, "summary quote")
+        self.assertEqual(projection.signals[0].extractor_name, "test-extractor")
+        self.assertEqual(projection.signals[0].extractor_version, "test-extractor-v1")
         self.assertEqual(projection.signals[0].generation_model, "test-model")
 
     def test_document_vector_projection_uses_document_level_signals(self) -> None:
@@ -84,7 +88,7 @@ class ProjectionFactoryTests(unittest.TestCase):
                 document_id="doc-2",
                 source_version="v1",
                 content_digest="content-digest-1",
-                index_input_digest="index-input-v1",
+                document_signal_input_digest="index-input-v1",
                 signal_type="concept",
                 signal_key="other-document",
                 text="Other document concept",
@@ -100,6 +104,7 @@ class ProjectionFactoryTests(unittest.TestCase):
         )
 
         self.assertIn("MVP memo", projection.embedding_input)
+        self.assertEqual(projection.title, "MVP memo")
         self.assertIn("Startup MVP validation summary", projection.embedding_input)
         self.assertIn("customer interview", projection.embedding_input)
         self.assertNotIn("Other document concept", projection.embedding_input)
@@ -118,6 +123,9 @@ class ProjectionFactoryTests(unittest.TestCase):
         self.assertEqual(projection.document_type, "document")
         self.assertEqual(projection.embedding_input, "customer interview")
         self.assertEqual(projection.evidence[0].chunk_id, "chunk-1")
+        self.assertEqual(projection.extractor_name, "test-extractor")
+        self.assertEqual(projection.extractor_version, "test-extractor-v1")
+        self.assertEqual(projection.generation_model, "test-model")
 
     def test_folder_signal_vector_projection_uses_signal_text_and_folder_metadata(
         self,
@@ -130,11 +138,13 @@ class ProjectionFactoryTests(unittest.TestCase):
             signal_type="responsibility",
             signal_key="responsibility",
             text="Folder responsibility matches member documents.",
-            index_input_digest="folder-signal-input-v1",
+            folder_signal_input_digest="folder-signal-input-v1",
             attributes={"responsibility_score": 0.82},
             related_document_id="doc-2",
             evidence=({"reason": "outlier"},),
             confidence=0.9,
+            extractor_name="folder-extractor",
+            extractor_version="folder-extractor-v1",
             generation_model="folder-model",
         )
 
@@ -154,7 +164,14 @@ class ProjectionFactoryTests(unittest.TestCase):
         self.assertEqual(projection.attributes["responsibility_score"], 0.82)
         self.assertEqual(projection.related_document_id, "doc-2")
         self.assertEqual(projection.evidence[0]["reason"], "outlier")
-        self.assertTrue(projection.index_input_digest)
+        self.assertEqual(projection.extractor_name, "folder-extractor")
+        self.assertEqual(projection.extractor_version, "folder-extractor-v1")
+        self.assertEqual(projection.generation_model, "folder-model")
+        self.assertEqual(
+            projection.source_input_digest,
+            "folder-signal-input-v1",
+        )
+        self.assertTrue(projection.vector_input_digest)
 
     def test_folder_relationship_projection_uses_only_source_hierarchy(self) -> None:
         folder = SourceFolder(
@@ -167,6 +184,7 @@ class ProjectionFactoryTests(unittest.TestCase):
             path="/Company/Founding",
             description="Founder resources",
             parent_folder_id="root",
+            metadata={"scope": "research"},
         )
 
         projection = folder_relationship_projection_from_source_folder(folder)
@@ -178,6 +196,8 @@ class ProjectionFactoryTests(unittest.TestCase):
         self.assertEqual(projection.created_at, folder.created_at)
         self.assertEqual(projection.updated_at, folder.updated_at)
         self.assertEqual(projection.parent_folder_id, "root")
+        self.assertEqual(projection.description, "Founder resources")
+        self.assertEqual(projection.metadata, {"scope": "research"})
 
     def test_folder_vector_projection_uses_folder_metadata(self) -> None:
         folder = SourceFolder(
@@ -200,6 +220,9 @@ class ProjectionFactoryTests(unittest.TestCase):
 
         self.assertEqual(projection.folder_id, "folder-1")
         self.assertEqual(projection.source_version, "folder-v1")
+        self.assertEqual(projection.name, "Founding")
+        self.assertEqual(projection.path, "/Company/Founding")
+        self.assertEqual(projection.description, "Founder resources")
         self.assertIn("Founding", projection.embedding_input)
         self.assertIn("/Company/Founding", projection.embedding_input)
         self.assertIn("Founder resources", projection.embedding_input)
@@ -214,7 +237,8 @@ def _profile() -> ProjectionDocumentProfile:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
-        index_input_digest="index-input-v1",
+        document_index_input_digest="index-input-v1",
+        document_signal_input_digest="document-signal-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         title="MVP memo",
@@ -229,12 +253,14 @@ def _summary_signal() -> ProjectionDocumentSignal:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
-        index_input_digest="index-input-v1",
+        document_signal_input_digest="document-signal-input-v1",
         signal_type="summary",
         signal_key="document-summary",
         text="Startup MVP validation summary",
         evidence=(ProjectionSignalEvidence(chunk_id="chunk-1", quote="summary quote"),),
         confidence=0.82,
+        extractor_name="test-extractor",
+        extractor_version="test-extractor-v1",
         generation_model="test-model",
     )
 
@@ -247,12 +273,14 @@ def _concept_signal() -> ProjectionDocumentSignal:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
-        index_input_digest="index-input-v1",
+        document_signal_input_digest="document-signal-input-v1",
         signal_type="concept",
         signal_key="startup",
         text="customer interview",
         evidence=(ProjectionSignalEvidence(chunk_id="chunk-1", quote="customer quote"),),
         confidence=0.9,
+        extractor_name="test-extractor",
+        extractor_version="test-extractor-v1",
         generation_model="test-model",
     )
 

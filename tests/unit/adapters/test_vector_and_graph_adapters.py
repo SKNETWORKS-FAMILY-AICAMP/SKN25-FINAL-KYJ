@@ -234,7 +234,7 @@ class VectorAdapterTests(unittest.TestCase):
             config=QdrantCollectionConfig(
                 collection_name="documents",
                 vector_size=3,
-                payload_indexes=("tenant", "updated_at", "index_input_digest"),
+                payload_indexes=("tenant", "updated_at", "source_input_digest", "vector_input_digest"),
             ),
             settings=QdrantSettings(url="http://qdrant:6333"),
             client=client,
@@ -248,7 +248,8 @@ class VectorAdapterTests(unittest.TestCase):
             [
                 ("documents", "tenant", "keyword"),
                 ("documents", "updated_at", "datetime"),
-                ("documents", "index_input_digest", "keyword"),
+                ("documents", "source_input_digest", "keyword"),
+                ("documents", "vector_input_digest", "keyword"),
             ],
         )
 
@@ -313,7 +314,7 @@ class VectorAdapterTests(unittest.TestCase):
                     "documents",
                     "document",
                     "doc-1",
-                    "index-input-v1",
+                    "vector-input-v1",
                 ),
                 stable_internal_id(
                     "signals",
@@ -321,7 +322,7 @@ class VectorAdapterTests(unittest.TestCase):
                     "document",
                     "doc-1",
                     "signal-1",
-                    "index-input-v1",
+                    "vector-input-v1",
                 ),
                 stable_internal_id(
                     "signals",
@@ -329,32 +330,91 @@ class VectorAdapterTests(unittest.TestCase):
                     "folder",
                     "folder-1",
                     "folder-signal-1",
-                    "folder-signal-input-v1",
+                    "vector-input-v1",
                 ),
                 stable_internal_id(
                     "folders",
                     "folder",
                     "folder-1",
-                    "folder-input-v1",
+                    "vector-input-v1",
                 ),
             ],
         )
+        self.assertEqual(payloads[0]["kind"], "document_chunk")
+        self.assertEqual(payloads[0]["search_text"], "startup evidence")
+        self.assertEqual(payloads[0]["source_start_offset"], 0)
+        self.assertEqual(payloads[0]["source_end_offset"], 16)
+        self.assertEqual(payloads[0]["source_input_digest"], "index-input-v1")
+        self.assertEqual(payloads[0]["vector_input_digest"], "vector-input-v1")
+        self.assertNotIn("text_hash", payloads[0])
+        self.assertNotIn("chunking_version", payloads[0])
+        self.assertNotIn("start_offset", payloads[0])
+        self.assertNotIn("end_offset", payloads[0])
         self.assertEqual(payloads[1]["kind"], "document")
+        self.assertEqual(payloads[1]["title"], "MVP memo")
         self.assertEqual(payloads[1]["content_digest"], "content-digest-1")
-        self.assertEqual(payloads[1]["index_input_digest"], "index-input-v1")
+        self.assertEqual(payloads[1]["source_input_digest"], "index-input-v1")
+        self.assertEqual(payloads[1]["vector_input_digest"], "vector-input-v1")
         self.assertNotIn("concept_ids", payloads[1])
         self.assertEqual(payloads[2]["kind"], "signal")
         self.assertEqual(payloads[2]["owner_kind"], "document")
         self.assertEqual(payloads[2]["document_type"], "document")
         self.assertEqual(payloads[2]["content_digest"], "content-digest-1")
-        self.assertEqual(payloads[2]["index_input_digest"], "index-input-v1")
+        self.assertEqual(payloads[2]["source_input_digest"], "index-input-v1")
+        self.assertEqual(payloads[2]["vector_input_digest"], "vector-input-v1")
+        self.assertEqual(payloads[2]["extractor_name"], "test-extractor")
+        self.assertEqual(payloads[2]["extractor_version"], "test-extractor-v1")
+        self.assertEqual(payloads[2]["generation_model"], "test-model")
         self.assertEqual(payloads[2]["evidence"][0]["chunk_id"], "chunk-1")
         self.assertEqual(payloads[3]["kind"], "signal")
         self.assertEqual(payloads[3]["owner_kind"], "folder")
         self.assertEqual(payloads[3]["folder_id"], "folder-1")
+        self.assertEqual(payloads[3]["extractor_name"], "folder-extractor")
+        self.assertEqual(payloads[3]["extractor_version"], "folder-extractor-v1")
+        self.assertEqual(payloads[3]["generation_model"], "folder-model")
         self.assertEqual(payloads[3]["attributes"]["responsibility_score"], 0.8)
         self.assertEqual(payloads[3]["related_document_id"], "doc-2")
+        self.assertEqual(payloads[4]["name"], "Founding")
+        self.assertEqual(payloads[4]["path"], "/Company/Founding")
+        self.assertEqual(payloads[4]["description"], "startup folder")
         self.assertNotIn("snapshot_digest", payloads[4])
+
+    def test_qdrant_folder_search_restores_folder_metadata(self) -> None:
+        client = FakeQdrantClient()
+        store = QdrantFolderVectorStore(
+            client=_qdrant_collection_client("folders", client),
+        )
+        client.points = [
+            FakeScoredPoint(
+                payload={
+                    "kind": "folder",
+                    "tenant": "tenant-1",
+                    "folder_id": "folder-1",
+                    "source_version": "folder-v1",
+                    "source_input_digest": "folder-input-v1",
+                    "vector_input_digest": "vector-input-v1",
+                    "created_at": "2026-05-01T10:00:00+09:00",
+                    "updated_at": "2026-05-02T11:00:00+09:00",
+                    "name": "Founding",
+                    "path": "/Company/Founding",
+                    "description": "startup folder",
+                    "embedding_input_hash": "folder-hash-1",
+                    "embedding_model": "embedding",
+                    "embedding_version": "v1",
+                    "index_schema_version": "schema-v1",
+                }
+            )
+        ]
+
+        results = store.search_folders(
+            tenant="tenant-1",
+            query_vector=[0.1],
+            top_k=5,
+        )
+
+        self.assertEqual(results[0].folder.name, "Founding")
+        self.assertEqual(results[0].folder.path, "/Company/Founding")
+        self.assertEqual(results[0].folder.description, "startup folder")
 
     def test_qdrant_signal_search_restores_evidence_and_filters_by_document(self) -> None:
         client = FakeQdrantClient()
@@ -557,7 +617,8 @@ class GraphAdapterTests(unittest.TestCase):
                 document_id="doc-1",
                 source_version="v1",
                 content_digest="content-digest-1",
-                index_input_digest="index-input-v1",
+                document_index_input_digest="index-input-v1",
+                document_signal_input_digest="document-signal-input-v1",
                 created_at="2026-05-01T10:00:00+09:00",
                 updated_at="2026-05-02T11:00:00+09:00",
                 title="Title",
@@ -571,8 +632,19 @@ class GraphAdapterTests(unittest.TestCase):
                         document_id="doc-1",
                         source_version="v1",
                         content_digest="content-digest-1",
-                        index_input_digest="index-input-v1",
+                        document_signal_input_digest="document-signal-input-v1",
+                        signal_generation_version="1",
+                        evidence=(
+                            ProjectionSignalEvidence(
+                                chunk_id="chunk-1",
+                                quote="startup evidence",
+                                start_offset=0,
+                                end_offset=16,
+                            ),
+                        ),
                         confidence=0.9,
+                        extractor_name="test-extractor",
+                        extractor_version="test-extractor-v1",
                         generation_model="test-model",
                     ),
                 ),
@@ -596,12 +668,42 @@ class GraphAdapterTests(unittest.TestCase):
         self.assertNotIn("document_type: $document_type", statements)
         self.assertIn("d.document_type = $document_type", statements)
         self.assertIn(
+            "d.document_signal_input_digest = $document_signal_input_digest",
+            statements,
+        )
+        self.assertIn("d.signal_generation_version = $signal_generation_version", statements)
+        self.assertIn(
             "MERGE (s:DocumentSignal {signal_id: $signal_id})",
             statements,
         )
         self.assertIn("MATCH (s:DocumentSignal {document_id: $document_id})", statements)
         self.assertIn("s.content_digest = $content_digest", statements)
+        self.assertIn("s.evidence_json = $evidence_json", statements)
+        self.assertIn("s.extractor_name = $extractor_name", statements)
+        self.assertIn("s.extractor_version = $extractor_version", statements)
         self.assertIn("r.content_digest = $content_digest", statements)
+        self.assertIn(
+            "r.document_signal_input_digest = $document_signal_input_digest",
+            statements,
+        )
+        self.assertIn("r.signal_generation_version = $signal_generation_version", statements)
+        signal_params = next(
+            parameters
+            for statement, parameters in tx.calls
+            if "MERGE (s:DocumentSignal {signal_id: $signal_id})" in statement
+        )
+        self.assertIn('"chunk_id": "chunk-1"', signal_params["evidence_json"])
+        self.assertIn('"quote": "startup evidence"', signal_params["evidence_json"])
+        relation_params = next(
+            parameters
+            for statement, parameters in tx.calls
+            if "MERGE (d)-[r:HAS_SIGNAL]->(s)" in statement
+        )
+        self.assertEqual(
+            relation_params["document_signal_input_digest"],
+            "document-signal-input-v1",
+        )
+        self.assertEqual(relation_params["signal_generation_version"], "1")
         self.assertNotIn(
             "MERGE (s:DocumentSignal {tenant: $tenant, signal_id: $signal_id})",
             statements,
@@ -648,7 +750,8 @@ class GraphAdapterTests(unittest.TestCase):
             statements,
         )
         self.assertNotIn("MERGE (f:Folder {folder_id: $folder_id})", statements)
-        self.assertIn("f.deleted = true", statements)
+        self.assertIn("f.projection_state = 'deleted'", statements)
+        self.assertIn("REMOVE f.deleted", statements)
         self.assertIn("outgoing_child_of:CHILD_OF", statements)
         self.assertIn("incoming_child_of:CHILD_OF", statements)
         self.assertIn(
@@ -683,6 +786,8 @@ class GraphAdapterTests(unittest.TestCase):
                 created_at="2026-05-01T10:00:00+09:00",
                 updated_at="2026-05-02T11:00:00+09:00",
                 parent_folder_id="root",
+                description="Folder description",
+                metadata={"scope": "research"},
             ),
         )
         repository.replace_folder_signals(
@@ -690,7 +795,7 @@ class GraphAdapterTests(unittest.TestCase):
                 tenant="tenant-1",
                 folder_id="folder-1",
                 source_version="folder-v1",
-                index_input_digest="folder-signal-input-v2",
+                folder_signal_input_digest="folder-signal-input-v2",
                 signals=(
                     FolderSignalNodeProjection(
                         signal_id="folder-signal-1",
@@ -701,8 +806,9 @@ class GraphAdapterTests(unittest.TestCase):
                         signal_key="doc-2",
                         text="Outlier document",
                         related_document_id="doc-2",
+                        evidence=({"reason": "outlier"},),
                         confidence=0.7,
-                        index_input_digest="folder-signal-input-v2",
+                        folder_signal_input_digest="folder-signal-input-v2",
                     ),
                 ),
             ),
@@ -723,15 +829,44 @@ class GraphAdapterTests(unittest.TestCase):
             "MATCH (child:Folder {tenant: $tenant, folder_id: $folder_id})",
             statements,
         )
-        self.assertIn("f.deleted = false", statements)
+        self.assertIn("f.projection_state = $projection_state", statements)
+        self.assertIn("REMOVE f.deleted", statements)
+        self.assertIn("f.description = $description", statements)
         self.assertNotIn("snapshot_digest", statements)
         self.assertIn("CHILD_OF", statements)
         self.assertNotIn("MERGE (s:FolderSignal {signal_id: $signal_id})", statements)
+        folder_params = client.sessions[0].transactions[0].calls[0][1]
+        self.assertEqual(folder_params["projection_state"], "active")
+        self.assertEqual(folder_params["description"], "Folder description")
+        self.assertEqual(folder_params["metadata_json"], '{"scope": "research"}')
 
         signal_statements = "\n".join(client.sessions[1].transactions[0].statements)
         self.assertIn("MERGE (s:FolderSignal {signal_id: $signal_id})", signal_statements)
-        self.assertIn("s.index_input_digest = $index_input_digest", signal_statements)
+        self.assertIn(
+            "s.folder_signal_input_digest = $folder_signal_input_digest",
+            signal_statements,
+        )
+        self.assertIn("s.evidence_json = $evidence_json", signal_statements)
+        self.assertIn("s.extractor_name = $extractor_name", signal_statements)
+        self.assertIn("s.extractor_version = $extractor_version", signal_statements)
+        self.assertIn("r.signal_generation_version = $signal_generation_version", signal_statements)
         self.assertIn("ABOUT_DOCUMENT", signal_statements)
+        signal_params = next(
+            parameters
+            for statement, parameters in client.sessions[1].transactions[0].calls
+            if "MERGE (s:FolderSignal {signal_id: $signal_id})" in statement
+        )
+        self.assertEqual(signal_params["evidence_json"], '[{"reason": "outlier"}]')
+        relation_params = next(
+            parameters
+            for statement, parameters in client.sessions[1].transactions[0].calls
+            if "MERGE (f)-[r:HAS_SIGNAL]->(s)" in statement
+        )
+        self.assertEqual(
+            relation_params["folder_signal_input_digest"],
+            "folder-signal-input-v2",
+        )
+        self.assertEqual(relation_params["signal_generation_version"], "1")
 
 
 def _qdrant_collection_client(
@@ -757,7 +892,8 @@ def _chunk_projection() -> DocumentChunkVectorProjection:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
-        index_input_digest="index-input-v1",
+        source_input_digest="index-input-v1",
+        vector_input_digest="vector-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id="chunk-1",
@@ -780,7 +916,8 @@ def _document_projection() -> DocumentVectorProjection:
         document_id="doc-1",
         source_version="v1",
         content_digest="content-digest-1",
-        index_input_digest="index-input-v1",
+        source_input_digest="index-input-v1",
+        vector_input_digest="vector-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         embedding_input="startup summary",
@@ -788,6 +925,7 @@ def _document_projection() -> DocumentVectorProjection:
         embedding_model="test-embedding",
         embedding_version="test-v1",
         index_schema_version="schema-v1",
+        title="MVP memo",
     )
 
 
@@ -801,7 +939,9 @@ def _signal_projection() -> DocumentSignalVectorProjection:
         signal_key="document-summary",
         source_version="v1",
         content_digest="content-digest-1",
-        index_input_digest="index-input-v1",
+        source_input_digest="index-input-v1",
+        vector_input_digest="vector-input-v1",
+        signal_generation_version="signal-v1",
         confidence=0.8,
         attributes={},
         evidence=(ProjectionSignalEvidence(chunk_id="chunk-1", quote="startup evidence"),),
@@ -810,6 +950,9 @@ def _signal_projection() -> DocumentSignalVectorProjection:
         embedding_model="test-embedding",
         embedding_version="test-v1",
         index_schema_version="schema-v1",
+        extractor_name="test-extractor",
+        extractor_version="test-extractor-v1",
+        generation_model="test-model",
     )
 
 
@@ -821,7 +964,9 @@ def _folder_signal_projection() -> FolderSignalVectorProjection:
         signal_type="responsibility",
         signal_key="responsibility",
         source_version="folder-v1",
-        index_input_digest="folder-signal-input-v1",
+        source_input_digest="folder-signal-input-v1",
+        vector_input_digest="vector-input-v1",
+        signal_generation_version="folder-signal-v1",
         attributes={"responsibility_score": 0.8},
         related_document_id="doc-2",
         confidence=0.9,
@@ -831,6 +976,9 @@ def _folder_signal_projection() -> FolderSignalVectorProjection:
         embedding_model="test-embedding",
         embedding_version="test-v1",
         index_schema_version="schema-v1",
+        extractor_name="folder-extractor",
+        extractor_version="folder-extractor-v1",
+        generation_model="folder-model",
     )
 
 
@@ -849,7 +997,9 @@ def _signal_payload(*, owner_kind: str) -> dict[str, object]:
             "text": "Folder responsibility",
             "source_version": "folder-v1",
             "content_digest": None,
-            "index_input_digest": "folder-signal-input-v1",
+            "source_input_digest": "folder-signal-input-v1",
+            "vector_input_digest": "vector-input-v1",
+            "signal_generation_version": "folder-signal-v1",
             "attributes": {"responsibility_score": 0.8},
             "related_document_id": "doc-2",
             "evidence": [{"reason": "document outlier"}],
@@ -873,7 +1023,9 @@ def _signal_payload(*, owner_kind: str) -> dict[str, object]:
         "text": "Document summary",
         "source_version": "v1",
         "content_digest": "content-digest-1",
-        "index_input_digest": "index-input-v1",
+        "source_input_digest": "index-input-v1",
+        "vector_input_digest": "vector-input-v1",
+        "signal_generation_version": "signal-v1",
         "attributes": {},
         "related_document_id": None,
         "evidence": [{"chunk_id": "chunk-1", "quote": "startup evidence"}],
@@ -891,7 +1043,8 @@ def _folder_projection() -> FolderVectorProjection:
         tenant="tenant-1",
         folder_id="folder-1",
         source_version="folder-v1",
-        index_input_digest="folder-input-v1",
+        source_input_digest="folder-input-v1",
+        vector_input_digest="vector-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         embedding_input="Founding\n\n/Company/Founding\n\nstartup folder",
@@ -899,6 +1052,9 @@ def _folder_projection() -> FolderVectorProjection:
         embedding_model="test-embedding",
         embedding_version="test-v1",
         index_schema_version="schema-v1",
+        name="Founding",
+        path="/Company/Founding",
+        description="startup folder",
     )
 
 

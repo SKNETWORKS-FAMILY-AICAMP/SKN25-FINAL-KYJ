@@ -91,12 +91,12 @@ class ProjectFolderSignalsGraphUseCase:
     source_freshness: SourceFreshnessChecker | None = None
 
     def execute(self, command: ProjectFolderSignalsCommand) -> None:
-        if not _is_current_folder_index_input_digest(self.source_freshness, command):
+        if not _is_current_folder_signal_input_digest(self.source_freshness, command):
             return
         signals = folder_signal_graph_projection_from_folder(
             command.folder,
             command.signals,
-            index_input_digest=command.index_input_digest,
+            folder_signal_input_digest=command.folder_signal_input_digest,
             signal_generation_version=command.signal_generation_version,
         )
         self.graph.replace_folder_signals(signals=signals)
@@ -112,7 +112,7 @@ class InvalidateFolderSignalsGraphUseCase:
             return
         self.graph.delete_stale_folder_signals(
             folder_id=command.folder_id,
-            current_index_input_digest=command.index_input_digest,
+            current_folder_signal_input_digest=command.folder_signal_input_digest,
         )
 
 
@@ -167,17 +167,17 @@ def _is_current_folder_source(
     )
 
 
-def _is_current_folder_index_input_digest(
+def _is_current_folder_signal_input_digest(
     source_freshness: SourceFreshnessChecker | None,
     command: ProjectFolderSignalsCommand,
 ) -> bool:
     if source_freshness is None:
         return True
     folder = command.folder
-    return source_freshness.is_current_folder_index_input_digest(
+    return source_freshness.is_current_folder_signal_input_digest(
         tenant=folder.tenant,
         folder_id=folder.folder_id,
-        index_input_digest=command.index_input_digest,
+        folder_signal_input_digest=command.folder_signal_input_digest,
     )
 
 
@@ -187,8 +187,8 @@ def _is_current_folder_signal_invalidation(
 ) -> bool:
     if source_freshness is None:
         return True
-    return source_freshness.is_current_folder_index_input_digest(
+    return source_freshness.is_current_folder_signal_input_digest(
         tenant=command.tenant,
         folder_id=command.folder_id,
-        index_input_digest=command.index_input_digest,
+        folder_signal_input_digest=command.folder_signal_input_digest,
     )

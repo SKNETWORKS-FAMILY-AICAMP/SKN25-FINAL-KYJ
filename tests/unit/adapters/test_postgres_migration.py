@@ -137,6 +137,9 @@ class PostgresMigrationTests(unittest.TestCase):
             schema.index("CREATE TABLE vector_projection_records")
         ]
         self.assertIn("title text NOT NULL DEFAULT ''", document_source_schema)
+        self.assertIn("title_search_vector tsvector GENERATED ALWAYS AS", document_source_schema)
+        self.assertIn("document_sources_title_search_idx", schema)
+        self.assertIn("ON document_sources USING gin (title_search_vector)", schema)
         self.assertIn("source_created_at timestamptz NOT NULL", document_source_schema)
         self.assertIn("source_updated_at timestamptz NOT NULL", document_source_schema)
         self.assertNotIn("folder_ids", document_source_schema)
@@ -173,11 +176,12 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertNotIn("metadata jsonb", folder_signal_schema)
         self.assertNotIn("indexed_snapshot_digest", folder_index_schema)
         self.assertNotIn("index_schema_version", folder_index_schema)
-        self.assertIn("index_input_digest text NOT NULL", document_index_schema)
+        self.assertIn("document_index_input_digest text NOT NULL", document_index_schema)
+        self.assertIn("document_signal_input_digest text NOT NULL", document_index_schema)
         self.assertIn("signal_generation_version text NOT NULL DEFAULT '1'", document_index_schema)
         self.assertNotIn("model text", document_index_schema)
         self.assertIn("tenant_id text NOT NULL", document_chunk_schema)
-        self.assertIn("index_input_digest text NOT NULL", document_chunk_schema)
+        self.assertIn("document_index_input_digest text NOT NULL", document_chunk_schema)
         self.assertIn("search_text text NOT NULL", document_chunk_schema)
         self.assertIn("search_vector tsvector GENERATED ALWAYS AS", document_chunk_schema)
         self.assertIn("source_start_offset integer NOT NULL", document_chunk_schema)
@@ -189,18 +193,20 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertNotIn("text_digest", document_chunk_schema)
         self.assertNotIn("source_version", document_chunk_schema)
         self.assertNotIn("chunking_version", document_chunk_schema)
-        self.assertIn("index_input_digest text NOT NULL", document_signal_schema)
+        self.assertIn("document_signal_input_digest text NOT NULL", document_signal_schema)
+        self.assertIn("signal_generation_version text NOT NULL", document_signal_schema)
         self.assertIn("generation_model text", document_signal_schema)
-        self.assertNotIn("signal_generation_version", document_signal_schema)
         self.assertNotIn("model text", folder_index_schema)
         self.assertIn("signal_generation_version text NOT NULL DEFAULT '1'", folder_index_schema)
-        self.assertIn("index_input_digest text NOT NULL", folder_index_schema)
+        self.assertIn("folder_index_input_digest text NOT NULL", folder_index_schema)
+        self.assertIn("folder_signal_input_digest text NOT NULL", folder_index_schema)
         self.assertIn("folder_signal_refresh_status text NOT NULL DEFAULT 'empty'", folder_index_schema)
         self.assertIn(
             "folder_signal_refresh_status IN ('empty', 'pending', 'ready', 'failed')",
             folder_index_schema,
         )
-        self.assertIn("index_input_digest text NOT NULL", folder_signal_schema)
+        self.assertIn("folder_signal_input_digest text NOT NULL", folder_signal_schema)
+        self.assertIn("signal_generation_version text NOT NULL", folder_signal_schema)
         self.assertIn("generation_model text", folder_signal_schema)
         self.assertIn("attributes_json jsonb NOT NULL", folder_signal_schema)
         self.assertNotIn("payload_json", folder_signal_schema)
@@ -250,7 +256,8 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("source_id text NOT NULL", vector_projection_schema)
         self.assertIn("vector_item_kind text NOT NULL", vector_projection_schema)
         self.assertIn("vector_item_id text NOT NULL", vector_projection_schema)
-        self.assertIn("index_input_digest text NOT NULL", vector_projection_schema)
+        self.assertIn("source_input_digest text NOT NULL", vector_projection_schema)
+        self.assertIn("vector_input_digest text NOT NULL", vector_projection_schema)
         self.assertIn("PRIMARY KEY (collection_name, point_id)", vector_projection_schema)
         self.assertIn(
             "tenant_id,\n        collection_name,\n        source_kind,\n        source_id,\n        vector_item_kind,\n        vector_item_id",
@@ -289,7 +296,7 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("document_index_records_retention_idx", schema)
         self.assertNotIn("document_chunks_document_idx", schema)
         self.assertIn(
-            "ON document_chunks (tenant_id, document_id, index_input_digest)",
+            "ON document_chunks (tenant_id, document_id, document_index_input_digest)",
             schema,
         )
         self.assertIn("document_chunks_document_order_idx", schema)

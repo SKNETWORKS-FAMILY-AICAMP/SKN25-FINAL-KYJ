@@ -100,13 +100,13 @@ class PostgresIndexingTransaction:
             folder=folder,
         )
 
-    def current_folder_index_input_digest(
+    def current_folder_signal_input_digest(
         self,
         *,
         tenant: str,
         folder_id: str,
     ) -> str | None:
-        return self.index_repository.current_folder_index_input_digest_with_connection(
+        return self.index_repository.current_folder_signal_input_digest_with_connection(
             self.conn,
             tenant=tenant,
             folder_id=folder_id,
@@ -117,14 +117,14 @@ class PostgresIndexingTransaction:
         *,
         folder: SourceFolder,
         signals: tuple[FolderSignal, ...],
-        expected_index_input_digest: str,
+        expected_folder_signal_input_digest: str,
         signal_generation_version: str,
     ) -> FolderSignalRefreshCommit:
         return self.index_repository.replace_folder_signals_with_connection(
             self.conn,
             folder=folder,
             signals=signals,
-            expected_index_input_digest=expected_index_input_digest,
+            expected_folder_signal_input_digest=expected_folder_signal_input_digest,
             signal_generation_version=signal_generation_version,
         )
 

@@ -398,7 +398,7 @@ def _document_chunk_for_signal(
         or signal.folder_id
         or "",
         source_version=signal.source_version,
-        index_input_digest="signal-evidence-index-input-v1",
+        document_index_input_digest="signal-evidence-index-input-v1",
         created_at="",
         updated_at="",
         chunk_id=chunk_id,

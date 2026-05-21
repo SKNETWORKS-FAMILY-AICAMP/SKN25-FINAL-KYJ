@@ -40,11 +40,11 @@ class EvaluateFolderResponsibilityUseCase:
         if folder is None:
             raise ResourceNotFoundError(f"Folder source not found: {command.folder_id}")
         with self.indexing_uow.transaction() as tx:
-            target_index_input_digest = tx.current_folder_index_input_digest(
+            target_folder_signal_input_digest = tx.current_folder_signal_input_digest(
                 tenant=command.tenant,
                 folder_id=command.folder_id,
             )
-        if target_index_input_digest is None:
+        if target_folder_signal_input_digest is None:
             raise ResourceNotFoundError(
                 f"Folder index record not found: {command.folder_id}"
             )
@@ -53,22 +53,23 @@ class EvaluateFolderResponsibilityUseCase:
             folder_id=command.folder_id,
         )
         extraction = self.signal_extractor.evaluate(folder, member_documents)
-        signals = _with_index_input_digest(
+        signals = _with_folder_signal_input_digest(
             extraction.signals,
-            index_input_digest=target_index_input_digest,
+            folder_signal_input_digest=target_folder_signal_input_digest,
+            signal_generation_version=extraction.signal_generation_version,
         )
         with self.indexing_uow.transaction() as tx:
             commit = tx.replace_folder_signals(
                 folder=folder,
                 signals=signals,
-                expected_index_input_digest=target_index_input_digest,
+                expected_folder_signal_input_digest=target_folder_signal_input_digest,
                 signal_generation_version=extraction.signal_generation_version,
             )
             if commit.applied:
                 tx.append_outbox_event(
                     folder_signals_indexed_event(
                         folder=folder,
-                        index_input_digest=commit.index_input_digest,
+                        folder_signal_input_digest=commit.folder_signal_input_digest,
                         signal_generation_version=extraction.signal_generation_version,
                         signals=signals,
                     )
@@ -82,10 +83,11 @@ class EvaluateFolderResponsibilityUseCase:
         )
 
 
-def _with_index_input_digest(
+def _with_folder_signal_input_digest(
     signals: tuple[FolderSignal, ...],
     *,
-    index_input_digest: str,
+    folder_signal_input_digest: str,
+    signal_generation_version: str,
 ) -> tuple[FolderSignal, ...]:
     return tuple(
         replace(
@@ -93,12 +95,14 @@ def _with_index_input_digest(
             signal_id=folder_signal_id(
                 tenant=signal.tenant,
                 folder_id=signal.folder_id,
-                index_input_digest=index_input_digest,
+                folder_signal_input_digest=folder_signal_input_digest,
+                signal_generation_version=signal_generation_version,
                 signal_type=signal.signal_type,
                 signal_key=signal.signal_key,
                 related_document_id=signal.related_document_id,
             ),
-            index_input_digest=index_input_digest,
+            folder_signal_input_digest=folder_signal_input_digest,
+            signal_generation_version=signal_generation_version,
         )
         for signal in signals
     )

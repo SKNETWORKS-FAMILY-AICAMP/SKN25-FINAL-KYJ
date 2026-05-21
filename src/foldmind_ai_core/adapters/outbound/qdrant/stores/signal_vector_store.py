@@ -106,7 +106,7 @@ class QdrantSignalVectorStore:
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
         self.client.delete_by_filter(
             self.client._models.Filter(
@@ -116,8 +116,8 @@ class QdrantSignalVectorStore:
                 ],
                 must_not=[
                     self.client._match_value_condition(
-                        "index_input_digest",
-                        current_index_input_digest,
+                        "source_input_digest",
+                        current_folder_signal_input_digest,
                     )
                 ],
             )
@@ -175,7 +175,7 @@ class QdrantSignalVectorStore:
                     owner_kind=owner_kind,
                     owner_id=_signal_owner_id(signal),
                     signal_id=signal.signal_id,
-                    index_input_digest=signal.index_input_digest,
+                    vector_input_digest=signal.vector_input_digest,
                 ),
             )
             for signal, vector, payload in zip(signals, vectors, payloads, strict=True)
@@ -205,7 +205,7 @@ def _signal_point_id(
     owner_kind: str,
     owner_id: str,
     signal_id: str,
-    index_input_digest: str,
+    vector_input_digest: str,
 ) -> str:
     return stable_internal_id(
         collection_name,
@@ -213,5 +213,5 @@ def _signal_point_id(
         owner_kind,
         owner_id,
         signal_id,
-        index_input_digest,
+        vector_input_digest,
     )

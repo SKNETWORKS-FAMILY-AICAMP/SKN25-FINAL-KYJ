@@ -339,10 +339,9 @@ class MessagingAdapterTests(unittest.TestCase):
     def test_message_codec_preserves_chunk_text_with_matching_offsets(self) -> None:
         event = _document_indexed_event()
         chunks = [dict(chunk) for chunk in event.payload["chunks"]]
-        chunks[0]["text"] = "  chunk text  "
-        chunks[0]["text_hash"] = "hash-with-padding"
-        chunks[0]["start_offset"] = 10
-        chunks[0]["end_offset"] = 24
+        chunks[0]["search_text"] = "  chunk text  "
+        chunks[0]["source_start_offset"] = 10
+        chunks[0]["source_end_offset"] = 24
         payload = dict(event.payload)
         payload["chunks"] = chunks
 
@@ -351,7 +350,6 @@ class MessagingAdapterTests(unittest.TestCase):
         )
 
         self.assertEqual(projection_event.chunks[0].text, "  chunk text  ")
-        self.assertEqual(projection_event.chunks[0].text_hash, "hash-with-padding")
         self.assertEqual(projection_event.chunks[0].start_offset, 10)
         self.assertEqual(projection_event.chunks[0].end_offset, 24)
 
@@ -573,7 +571,7 @@ def _document_indexed_event():
         document_type=document.document_type,
         document_id=document.document_id,
         source_version=document.source_version,
-        index_input_digest="index-input-v1",
+        document_index_input_digest="index-input-v1",
         created_at=document.created_at,
         updated_at=document.updated_at,
         chunk_id="chunk-1",
@@ -595,7 +593,8 @@ def _document_indexed_event():
         created_at=document.created_at,
         updated_at=document.updated_at,
         title=document.title,
-        index_input_digest=chunk.index_input_digest,
+        document_index_input_digest=chunk.document_index_input_digest,
+        document_signal_input_digest=chunk.document_index_input_digest,
     )
     return document_indexed_event(
         document=document,
@@ -626,7 +625,7 @@ def _summary_signal(
         document_type=document.document_type,
         document_id=document.document_id,
         source_version=document.source_version,
-        index_input_digest=chunk.index_input_digest,
+        document_signal_input_digest=chunk.document_index_input_digest,
         signal_type=DocumentSignalType.SUMMARY,
         text="Summary",
         attributes={},

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import hashlib
 from collections.abc import Mapping
 from typing import cast
 
@@ -130,7 +131,10 @@ def folder_signals_indexed_event_from_outbox(
         folder=_source_folder_from_payload(
             _nested_json_object(event.payload, "source_folder")
         ),
-        index_input_digest=_required_text(event.payload, "index_input_digest"),
+        folder_signal_input_digest=_required_text(
+            event.payload,
+            "folder_signal_input_digest",
+        ),
         signal_generation_version=_required_text(
             event.payload,
             "signal_generation_version",
@@ -154,7 +158,10 @@ def folder_signals_invalidated_event_from_outbox(
     return FolderSignalsInvalidatedProjectionEvent(
         tenant=tenant,
         folder_id=folder_id,
-        index_input_digest=_required_text(event.payload, "index_input_digest"),
+        folder_signal_input_digest=_required_text(
+            event.payload,
+            "folder_signal_input_digest",
+        ),
         signal_generation_version=_required_text(
             event.payload,
             "signal_generation_version",
@@ -216,14 +223,16 @@ def _validate_document_indexed_event(event: DocumentIndexedProjectionEvent) -> N
         event.document.document_id,
         event.document.source_version,
         event.document.content_digest,
-        event.profile.index_input_digest,
+        event.profile.document_index_input_digest,
+        event.profile.document_signal_input_digest,
     )
     profile_context = (
         event.profile.tenant,
         event.profile.document_id,
         event.profile.source_version,
         event.profile.content_digest,
-        event.profile.index_input_digest,
+        event.profile.document_index_input_digest,
+        event.profile.document_signal_input_digest,
     )
     if (
         profile_context != expected_context
@@ -233,7 +242,8 @@ def _validate_document_indexed_event(event: DocumentIndexedProjectionEvent) -> N
                 chunk.document_id,
                 chunk.source_version,
                 chunk.content_digest,
-                chunk.index_input_digest,
+                chunk.source_input_digest,
+                event.profile.document_signal_input_digest,
             )
             != expected_context
             for chunk in event.chunks
@@ -244,7 +254,8 @@ def _validate_document_indexed_event(event: DocumentIndexedProjectionEvent) -> N
                 signal.document_id,
                 signal.source_version,
                 signal.content_digest,
-                signal.index_input_digest,
+                event.profile.document_index_input_digest,
+                signal.document_signal_input_digest,
             )
             != expected_context
             for signal in event.signals
@@ -336,6 +347,7 @@ def _source_folder_from_payload(payload: JsonObject) -> ProjectionFolder:
 
 
 def _document_chunk_from_payload(payload: JsonObject) -> DocumentChunkVectorProjection:
+    search_text = _required_content_text(payload, "search_text")
     return DocumentChunkVectorProjection(
         tenant=_required_text(payload, "tenant"),
         document_type=_optional_non_blank_text(
@@ -345,16 +357,17 @@ def _document_chunk_from_payload(payload: JsonObject) -> DocumentChunkVectorProj
         document_id=_required_text(payload, "document_id"),
         source_version=_required_text(payload, "source_version"),
         content_digest=_required_text(payload, "content_digest"),
-        index_input_digest=_required_text(payload, "index_input_digest"),
+        source_input_digest=_required_text(payload, "source_input_digest"),
+        vector_input_digest=_required_text(payload, "vector_input_digest"),
         created_at=_required_text(payload, "created_at"),
         updated_at=_required_text(payload, "updated_at"),
         chunk_id=_required_text(payload, "chunk_id"),
         chunk_index=_required_int(payload, "chunk_index"),
         chunking_version=_required_text(payload, "chunking_version"),
-        text=_required_content_text(payload, "text"),
-        text_hash=_required_text(payload, "text_hash"),
-        start_offset=_required_int(payload, "start_offset"),
-        end_offset=_required_int(payload, "end_offset"),
+        text=search_text,
+        text_hash=hashlib.sha256(search_text.encode("utf-8")).hexdigest(),
+        start_offset=_required_int(payload, "source_start_offset"),
+        end_offset=_required_int(payload, "source_end_offset"),
         embedding_model=_required_text(payload, "embedding_model"),
         embedding_version=_required_text(payload, "embedding_version"),
         index_schema_version=_required_text(payload, "index_schema_version"),
@@ -381,7 +394,14 @@ def _document_profile_from_payload(payload: JsonObject) -> ProjectionDocumentPro
         document_id=_required_text(payload, "document_id"),
         source_version=_required_text(payload, "source_version"),
         content_digest=_required_text(payload, "content_digest"),
-        index_input_digest=_required_text(payload, "index_input_digest"),
+        document_index_input_digest=_required_text(
+            payload,
+            "document_index_input_digest",
+        ),
+        document_signal_input_digest=_required_text(
+            payload,
+            "document_signal_input_digest",
+        ),
         signal_generation_version=_required_text(payload, "signal_generation_version"),
         created_at=_required_text(payload, "created_at"),
         updated_at=_required_text(payload, "updated_at"),
@@ -401,7 +421,14 @@ def _document_signal_from_payload(payload: JsonObject) -> ProjectionDocumentSign
         document_id=_required_text(payload, "document_id"),
         source_version=_required_text(payload, "source_version"),
         content_digest=_required_text(payload, "content_digest"),
-        index_input_digest=_required_text(payload, "index_input_digest"),
+        document_signal_input_digest=_required_text(
+            payload,
+            "document_signal_input_digest",
+        ),
+        signal_generation_version=_required_text(
+            payload,
+            "signal_generation_version",
+        ),
         signal_type=_required_text(payload, "signal_type"),
         signal_key=_required_text(payload, "signal_key"),
         text=_required_content_text(payload, "text"),
@@ -433,7 +460,14 @@ def _folder_signal_from_payload(payload: JsonObject) -> ProjectionFolderSignal:
         tenant=_required_text(payload, "tenant"),
         folder_id=_required_text(payload, "folder_id"),
         source_version=_required_text(payload, "source_version"),
-        index_input_digest=_required_text(payload, "index_input_digest"),
+        folder_signal_input_digest=_required_text(
+            payload,
+            "folder_signal_input_digest",
+        ),
+        signal_generation_version=_required_text(
+            payload,
+            "signal_generation_version",
+        ),
         signal_type=_required_text(payload, "signal_type"),
         signal_key=_required_text(payload, "signal_key"),
         text=_required_content_text(payload, "text"),

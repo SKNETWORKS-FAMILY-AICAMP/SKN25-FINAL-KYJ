@@ -17,8 +17,11 @@ CREATE TABLE vector_projection_records (
         vector_item_kind IN ('document', 'chunk', 'signal', 'folder')
     ),
     vector_item_id text NOT NULL CHECK (length(btrim(vector_item_id)) > 0),
-    index_input_digest text NOT NULL CHECK (
-        length(btrim(index_input_digest)) > 0
+    source_input_digest text NOT NULL CHECK (
+        length(btrim(source_input_digest)) > 0
+    ),
+    vector_input_digest text NOT NULL CHECK (
+        length(btrim(vector_input_digest)) > 0
     ),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),

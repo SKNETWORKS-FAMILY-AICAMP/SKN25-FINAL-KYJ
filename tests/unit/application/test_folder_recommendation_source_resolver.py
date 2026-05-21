@@ -124,7 +124,7 @@ class FakeGraphStore:
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
         raise AssertionError("Folder signal deletes are not expected in this test.")
 

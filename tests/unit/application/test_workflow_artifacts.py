@@ -409,7 +409,7 @@ def _chunk(document_id: str, chunk_index: int = 0, text: str = "retrieved eviden
         document_type="document",
         document_id=document_id,
         source_version="v1",
-        index_input_digest="index-input-v1",
+        document_index_input_digest="index-input-v1",
         created_at="2026-05-01T10:00:00+09:00",
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id=f"{document_id}:chunk:{chunk_index}",

@@ -10,16 +10,15 @@ class QdrantDocumentChunkPayload:
     document_id: str
     source_version: str
     content_digest: str
-    index_input_digest: str
+    source_input_digest: str
+    vector_input_digest: str
     created_at: str
     updated_at: str
     chunk_id: str
-    text: str
-    text_hash: str
+    search_text: str
     chunk_index: int
-    chunking_version: str
-    start_offset: int
-    end_offset: int
+    source_start_offset: int
+    source_end_offset: int
     embedding_model: str
     embedding_version: str
     index_schema_version: str
@@ -33,13 +32,15 @@ class QdrantDocumentPayload:
     document_id: str
     source_version: str
     content_digest: str
-    index_input_digest: str
+    source_input_digest: str
+    vector_input_digest: str
     created_at: str
     updated_at: str
     embedding_input_hash: str
     embedding_model: str
     embedding_version: str
     index_schema_version: str
+    title: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +56,9 @@ class QdrantSignalPayload:
     text: str
     source_version: str
     content_digest: str | None
-    index_input_digest: str
+    source_input_digest: str
+    vector_input_digest: str
+    signal_generation_version: str
     related_document_id: str | None
     attributes: JsonObject
     evidence: tuple[JsonObject, ...]
@@ -64,6 +67,9 @@ class QdrantSignalPayload:
     embedding_model: str
     embedding_version: str
     index_schema_version: str
+    extractor_name: str = ""
+    extractor_version: str = ""
+    generation_model: str | None = None
     metadata: JsonObject = field(default_factory=dict)
 
 
@@ -72,10 +78,14 @@ class QdrantFolderPayload:
     tenant: str
     folder_id: str
     source_version: str
-    index_input_digest: str
+    source_input_digest: str
+    vector_input_digest: str
     created_at: str
     updated_at: str
     embedding_input_hash: str
     embedding_model: str
     embedding_version: str
     index_schema_version: str
+    name: str = ""
+    path: str | None = None
+    description: str = ""

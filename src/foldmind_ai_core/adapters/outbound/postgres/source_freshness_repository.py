@@ -35,13 +35,13 @@ WHERE tenant_id = %s
 LIMIT 1
 """
 
-_CURRENT_FOLDER_INDEX_INPUT_DIGEST_SQL = """
+_CURRENT_FOLDER_SIGNAL_INPUT_DIGEST_SQL = """
 SELECT 1
 FROM folder_index_records fir
 JOIN folder_sources fs ON fs.folder_id = fir.folder_id
 WHERE fs.tenant_id = %s
   AND fir.folder_id = %s
-  AND fir.index_input_digest = %s
+  AND fir.folder_signal_input_digest = %s
   AND fir.deleted_at IS NULL
 LIMIT 1
 """
@@ -100,18 +100,18 @@ class PostgresSourceFreshnessRepository:
                 is not None
             )
 
-    def is_current_folder_index_input_digest(
+    def is_current_folder_signal_input_digest(
         self,
         *,
         tenant: str,
         folder_id: str,
-        index_input_digest: str,
+        folder_signal_input_digest: str,
     ) -> bool:
         with self.client.connect() as conn:
             return (
                 conn.execute(
-                    _CURRENT_FOLDER_INDEX_INPUT_DIGEST_SQL,
-                    (tenant, folder_id, index_input_digest),
+                    _CURRENT_FOLDER_SIGNAL_INPUT_DIGEST_SQL,
+                    (tenant, folder_id, folder_signal_input_digest),
                 ).fetchone()
                 is not None
             )

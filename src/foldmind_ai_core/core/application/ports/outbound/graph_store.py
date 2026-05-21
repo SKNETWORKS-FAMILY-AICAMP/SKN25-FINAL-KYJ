@@ -76,7 +76,7 @@ class GraphStore(Protocol):
         self,
         *,
         folder_id: str,
-        current_index_input_digest: str,
+        current_folder_signal_input_digest: str,
     ) -> None:
         ...
 
