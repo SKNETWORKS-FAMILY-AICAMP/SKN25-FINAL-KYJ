@@ -6,7 +6,7 @@ FoldMind-AI-Core is the AI processing server that runs beside the FoldMind app
 server. The app server remains the owner of source documents, folders,
 permissions, users, and business rules. AI-Core receives current-state snapshots
 from the app server and stores only derived AI data: search payloads, document
-AI profiles, lightweight folder metadata indexes, graph relationships, workflow
+index records and signals, lightweight folder metadata indexes, graph relationships, workflow
 snapshots, and task events.
 
 AI-Core does not replace the app server database. It does not store or mutate
@@ -16,19 +16,19 @@ canonical source data.
 
 | Area | What Happens |
 | --- | --- |
-| Document indexing | Split document text into chunks, embed each chunk, create a document AI profile, and store graph DB relationships. |
-| Folder indexing | Embed folder metadata and store lightweight folder vector and graph hierarchy records. |
+| Document indexing | Split document text into chunks, create document index records and signals, and emit outbox events for asynchronous vector and graph projections. |
+| Folder indexing | Store lightweight folder index state and emit outbox events for asynchronous folder vector and graph hierarchy projections. |
 | Document search | Convert the question into an embedding, then use the vector DB and graph DB together to find evidence chunks. |
 | Answer generation | Send retrieved chunks to the LLM and return generated text with citations. |
 | Workflow tasks | Break a natural-language request into steps, execute AI work, and return source-data changes as host actions for the app server. |
-| Persistence scope | Store document profiles, vector payloads, graph relationships, task snapshots, and task events. Do not store canonical source data. |
+| Persistence scope | Store document index records, document signals, vector payloads, graph relationships, task snapshots, and task events. Do not store canonical source data. |
 
 ## Responsibility Boundary
 
 | Owner | Owns |
 | --- | --- |
 | FoldMind app server | Source documents, source folders, source tags, permissions, users, and business rules. |
-| AI-Core | Document AI profiles, vector index payloads, graph DB relationships, retrieval results, generated outputs, workflow state, and proposed host actions. |
+| AI-Core | Document index records, document signals, vector index payloads, graph DB relationships, retrieval results, generated outputs, workflow state, and proposed host actions. |
 
 AI-Core does not call the app server directly. When a task needs to create a folder,
 move a document, or perform another source-data change, AI-Core returns a
@@ -40,27 +40,29 @@ and reports the result back to AI-Core.
 **Document Indexing**
 
 The app server sends a `SourceDocument` snapshot. AI-Core splits the body into
-searchable `DocumentChunk` records and creates an embedding for each chunk. The LLM
-then creates a profiling manifest (`DocumentProfile`) and extracted
-`KnowledgeSignal` records for summary, concept, entity, issue, commitment, and
-claim evidence.
+searchable `DocumentChunk` records. AI-Core stores a `DocumentIndexRecord` for
+the current digest state, and the LLM creates extracted `DocumentSignal` records
+for summary, concept, entity, issue, commitment, and claim evidence.
 
-Indexing writes the profile and an outbox event atomically to PostgreSQL.
-Debezium Kafka consumers asynchronously project Qdrant and graph DB state. Outbox
-events carry a database-generated sequence, idempotency key, and `AGGREGATE:ID`
-event key for stream ordering, idempotency, and dead-letter context. Qdrant
-stores chunk, signal, folder, and document-level vectors. The graph DB stores
-document-to-folder, document-to-signal, folder-to-signal, and folder hierarchy
-relationships. Neo4j projection state is not mirrored in
+Indexing writes the index record, signals, and an outbox event atomically to PostgreSQL.
+Debezium Kafka consumers asynchronously create embeddings and project Qdrant and
+graph DB state. Outbox events carry a database-generated sequence, idempotency
+key, and generated `partition_key` for stream ordering, idempotency, and
+dead-letter context. Delete event idempotency keys include the current
+`source_version` so a later reindex/delete cycle is not swallowed as a duplicate.
+Qdrant stores chunk, signal, folder, and document-level
+vectors. The graph DB stores document-to-folder, document-to-signal,
+folder-to-signal, and folder hierarchy relationships. Neo4j projection state is not mirrored in
 PostgreSQL; recovery uses outbox replay plus Kafka dead-letter handling. Chunk
 text stays in Qdrant; chunk nodes are not projected into the graph DB.
 
 **Folder Indexing**
 
 The app server sends a `SourceFolder` snapshot. AI-Core reads folder metadata and
-stores it as a lightweight derived index. It embeds the folder name, path, and
-description into the Qdrant folder collection and projects a `Folder` node plus
-folder hierarchy edges into the graph DB.
+stores it as a lightweight derived index. It emits an outbox event so projection
+workers embed the folder name, path, and description into the Qdrant folder
+collection and project a `Folder` node plus folder hierarchy edges into the graph
+DB.
 
 Folder indexing does not create or store a PostgreSQL folder profile. Folder names,
 paths, descriptions, and hierarchy records are rebuildable search indexes; the app
@@ -68,29 +70,24 @@ server remains canonical for folder display data and permissions.
 
 **Document Search**
 
-Document search uses two stores together.
+Document search is an application service used by workflow steps.
 
 1. Qdrant finds chunks and documents that are semantically close to the question.
-2. The graph DB finds documents linked through folders and knowledge signals.
-3. AI-Core combines the document IDs found by both stores and searches chunks inside those documents.
-4. Retrieved chunks are ranked by score.
-5. The relevance filter agent removes chunks that do not answer the question.
-
-`/retrieval/search` returns the resulting chunk list.
+2. PostgreSQL keyword search contributes lexical chunk matches.
+3. The graph DB finds documents linked through folders and extracted signals.
+4. AI-Core merges dense, keyword, document-level, and graph signals into ranked chunks.
 
 **Question Answering**
 
-`/retrieval/answer` first runs document search. It then formats the retrieved chunk
-text, document ID, chunk ID, and score as context for the LLM. The LLM writes the
-answer using that context as evidence. The response includes generated text and
-citations for the chunks used as evidence.
+Question answering runs as a workflow task. The workflow searches relevant
+documents, formats retrieved context for the LLM, and returns generated text with
+citations in the task result.
 
 **Recommendations**
 
-`/retrieval/folder-recommendations` receives a document snapshot and returns the
-folder ID that best matches that document, with a score and reason. The app server
-uses the returned `folder_id` to enrich display fields and decide where to place a
-document.
+Folder recommendations run through workflow recommendation steps. AI-Core returns
+candidate folder IDs with scores and reasons; the app server remains responsible
+for applying any source-data change.
 
 **Workflow Tasks**
 
@@ -109,28 +106,27 @@ report the result.
 | App server sends | `POST /indexing/documents` with title, body, version, folder IDs, and metadata. |
 | AI-Core validates | Tenant, source identity, version, and indexable text are checked. |
 | AI-Core creates chunks | The body is split into `DocumentChunk` records. |
-| AI-Core creates embeddings | Each chunk body is converted into a vector. |
-| AI-Core creates signals | The LLM generates a profiling manifest plus summary, concept, entity, issue, commitment, and claim signals. |
-| AI-Core stores derived data | PostgreSQL, Qdrant, and the graph DB receive derived records. |
+| AI-Core creates signals | The LLM generates summary, concept, entity, issue, commitment, and claim signals. |
+| AI-Core stores derived data | PostgreSQL receives the index records and transactional outbox events. |
+| Projection workers run | Outbox consumers create embeddings and project Qdrant and graph DB records. |
 | App server receives | The indexed chunk count. The source document remains owned by the app server. |
 
-### 2. Answer A Question
+### 2. Answer A Question With A Task
 
 | Step | What Happens |
 | --- | --- |
-| App server sends | `POST /retrieval/answer` with question, tenant, and search scope. |
+| App server sends | `POST /tasks` with a natural-language question, tenant, and optional context. |
 | AI-Core finds document IDs | Qdrant document vectors and graph DB relationship search find related document IDs. |
 | AI-Core finds chunks | Chunks are searched inside those documents. If no document IDs are found, chunk search runs directly within the requested scope. |
-| AI-Core filters chunks | The relevance filter agent removes chunks unrelated to the question. |
-| AI-Core generates an answer | The answer generation agent writes an answer from the remaining chunks. |
-| App server receives | Answer text and citations for evidence chunks. |
+| AI-Core generates an answer | The context generation agent writes an answer from retrieved context. |
+| App server receives | A task snapshot containing answer text and citations. |
 
 ### 3. Run A Workflow Task
 
 | Step | What Happens |
 | --- | --- |
-| App server starts | `POST /tasks` with tenant and a natural-language request. AI-Core generates the task ID and task request ID. |
-| App server continues | `POST /tasks` with the existing `task_id` appends another request to the same task. |
+| App server starts | `POST /tasks` with tenant and a natural-language request. AI-Core generates the task ID and first task input ID. |
+| App server continues | `POST /tasks/{task_id}/inputs` appends another input to the same task. |
 | AI-Core plans | The planning agent turns the request into executable workflow steps. |
 | AI-Core executes | Search, recommendation, summary, answer, draft, and idea steps run inside AI-Core. |
 | AI-Core proposes actions | Source-data changes are returned as `HostAction` values in the task snapshot. |
@@ -154,37 +150,35 @@ tasks or recommendation targets return `404` on routes that handle those cases.
 | Method | Path | Request DTO | Response DTO | Purpose |
 | --- | --- | --- | --- | --- |
 | `POST` | `/indexing/documents` | `IndexDocumentRequest` | `IndexDocumentResponse` | Index a document snapshot and return the created chunk count. |
-| `DELETE` | `/indexing/documents/{document_id}` | - | `204 No Content` | Delete the document profile, vector payloads, and graph DB relationships. |
+| `DELETE` | `/indexing/documents/{document_id}` | - | `204 No Content` | Delete the document index record, signals, vector payloads, and graph DB relationships. |
 | `POST` | `/indexing/folders` | `IndexFolderRequest` | `IndexFolderResponse` | Index a folder snapshot and return the searchable folder model. |
 | `DELETE` | `/indexing/folders/{folder_id}` | - | `204 No Content` | Delete the folder vector payloads and graph DB relationships. |
 
 ### Retrieval And Recommendations
 
-| Method | Path | Request DTO | Response DTO | Purpose |
-| --- | --- | --- | --- | --- |
-| `POST` | `/retrieval/search` | `SearchDocumentsRequest` | `SearchDocumentsResponse` | Return AI-Core-stored document chunks related to the question. |
-| `POST` | `/retrieval/answer` | `AnswerQuestionRequest` | `GeneratedTextResponse` | Find related chunks, then generate an answer and citations from those chunks. |
-| `POST` | `/retrieval/folder-recommendations` | `RecommendFolderRequest` | `RecommendFolderResponse` | Recommend the best `folder_id` for a document snapshot. |
+Document, signal, and folder retrieval are application services used by workflow
+steps. They are not exposed as standalone HTTP routes in the current API.
 
 ### Workflow Tasks
 
 | Method | Path | Request DTO | Response DTO | Purpose |
 | --- | --- | --- | --- | --- |
-| `POST` | `/tasks` | `CreateTaskRequest` | `TaskSnapshotResponse` | Start a task or append a request to an existing task. |
+| `POST` | `/tasks` | `CreateTaskRequest` | `TaskSnapshotResponse` | Start a task from a natural-language input. |
+| `POST` | `/tasks/{task_id}/inputs` | `AppendTaskInputRequest` | `TaskSnapshotResponse` | Append a natural-language input to an existing task and replan. |
 | `GET` | `/tasks/{task_id}` | - | `TaskSnapshotResponse` | Read the latest task snapshot visible to the app server. |
-| `DELETE` | `/tasks/requests/{task_request_id}` | - | `TaskSnapshotResponse` | Mark a request entry as removed and replan from the active requests. |
+| `DELETE` | `/tasks/inputs/{task_input_id}` | - | `TaskSnapshotResponse` | Mark an input entry as removed and replan from the active inputs. |
 | `POST` | `/tasks/actions/result` | `RecordHostActionResultRequest` | `RecordHostActionResultResponse` | Resume a paused workflow after the app server reports a host action result. |
 
 ## Search Behavior
 
-Document search is implemented by `FindDocumentsUseCase`.
+Document search is implemented by `DocumentSearchService`.
 
 1. Convert the question text into an embedding.
 2. Search the Qdrant `documents` collection for related document IDs.
-3. Search the graph DB for document IDs connected to the question through folders and knowledge signals.
+3. Search the graph DB for document IDs connected to the question through folders and extracted signals.
 4. If document IDs were found, run chunk vector search inside those documents.
 5. If no document IDs were found, run chunk vector search directly within the request `SearchScope`.
-6. `ChunkRelevanceFilterAgent` removes chunks that are not related to the question.
+6. Hybrid retrieval merges dense and keyword results, applies document-level boosts, and returns the highest ranked chunks.
 
 The current Qdrant adapter implements dense chunk vectors, document-level vectors,
 and folder vectors.
@@ -194,17 +188,17 @@ and folder vectors.
 The workflow API lets AI-Core reason and propose actions while the app server keeps
 control of source-data changes.
 
-1. The app server calls `POST /tasks` with tenant and a natural-language request. AI-Core generates `task_id` and `task_request_id`.
-2. A later `POST /tasks` with the same `task_id` appends another request to the same task instead of creating a new task.
-3. `RunTaskUseCase` stores the current `TaskSnapshot` and calls the workflow runtime.
-3. `PlanningAgent` turns the request into a `WorkflowPlan`.
-4. `WorkflowPlanCompiler` turns the plan into executable steps.
-5. `WorkflowStepExecutor` dispatches each step to a search, recommendation, generation, or host-action planning step.
-6. Step results are recorded through `WorkflowArtifactRegistry` and exposed as app-server-visible `TaskOutput` values.
-7. When a host action is created, the workflow saves a checkpoint and pauses.
-8. The app server can remove a request entry through `DELETE /tasks/requests/{task_request_id}`.
-9. The app server reports the action result through `POST /tasks/actions/result`, and the workflow resumes from the checkpoint.
-10. When no steps or pending actions remain, the final `TaskSnapshot` is stored.
+1. The app server calls `POST /tasks` with tenant and a natural-language input. AI-Core generates `task_id` and `task_input_id`.
+2. A later `POST /tasks/{task_id}/inputs` appends another input to the same task.
+3. `TaskWorkflowService` stores the current `TaskSnapshot` and calls the workflow runtime.
+4. `PlanningAgent` turns the request into a `WorkflowPlan`.
+5. `WorkflowPlanCompiler` turns the plan into executable steps.
+6. `WorkflowStepExecutor` dispatches each step to a search, recommendation, generation, or host-action planning step.
+7. Step results are recorded through `WorkflowArtifactRegistry` and exposed as app-server-visible `TaskFinalResult` values.
+8. When a host action is created, the workflow saves a checkpoint and pauses.
+9. The app server can remove an input entry through `DELETE /tasks/inputs/{task_input_id}`.
+10. The app server reports the action result through `POST /tasks/actions/result`, and the workflow resumes from the checkpoint.
+11. When no steps or pending actions remain, the final `TaskSnapshot` is stored.
 
 ## Agents
 
@@ -215,8 +209,7 @@ OpenAI SDK.
 | Agent | Prompt key | Used by | Responsibility |
 | --- | --- | --- | --- |
 | `PlanningAgent` | `workflow_planning` | `WorkflowEngine.prepare()` | Turn a natural-language task into a validated `WorkflowPlan`. |
-| `DocumentProfilerAgent` | `document_profiling` | `IndexDocumentUseCase` | Create a `DocumentProfile` manifest and `KnowledgeSignal` set from a document and its chunks. |
-| `ChunkRelevanceFilterAgent` | `chunk_relevance_filtering` | `FindDocumentsUseCase` | Keep only retrieved chunks related to the question. |
+| `DocumentSignalExtractorAgent` | `document_signal_extraction` | `DocumentIndexingService` | Create a `DocumentIndexRecord` and `DocumentSignal` set from a document and its chunks. |
 | `ContextGenerationAgent` | `answer_generation`, `summarization`, `draft_generation`, `ideas_exploration` | Retrieval and workflow generation steps | Generate cited text from retrieved chunks using a caller-selected prompt. |
 
 Context generation agents render `UNTRUSTED_CONTEXT_INSTRUCTION` into prompts before
@@ -230,21 +223,21 @@ runtime.
 | --- | --- | --- |
 | Source snapshot | `SourceDocument`, `SourceFolder` | Current-state source data sent by the app server. Ownership does not transfer to AI-Core. |
 | Retrieval/index model | `DocumentChunk`, `DocumentVectorProjection`, `FolderVectorProjection`, `RetrievedDocument`, `RetrievedFolder` | Store-specific projections and retrieval-facing references created by AI-Core. |
-| AI profile | `DocumentProfile`, `KnowledgeSignal` | Profiling manifest plus signalized summary, concept, entity, issue, commitment, and claim outputs. |
+| Signals | `DocumentSignal`, `FolderSignal` | Signalized summary, concept, entity, issue, commitment, and claim outputs. |
 | Retrieval | `RetrievalQuery`, `RequestContext`, `SearchScope`, `QueryAnchor` | Question text, tenant information, search scope, and anchor. |
 | Generation | `GeneratedTextResult`, `DraftResult`, recommendation results, clarification results | Typed outputs produced by generation and recommendation steps. |
-| Workflow | `TaskRequest`, `TaskSnapshot`, `TaskAnalysis`, `TaskOutput`, `TaskEvent` | Task state and outputs visible to the app server. |
+| Workflow | `TaskInputEntry`, `TaskSnapshot`, `TaskAnalysis`, `TaskFinalResult`, `TaskEvent` | Task input history, state, and outputs visible to the app server. |
 | Host action | `HostAction`, `HostActionResult`, action input/output payload | Proposed source-data change that the app server must execute. |
-| Knowledge graph | `DocumentRelationshipProjection`, `DocumentSignalGraphProjection`, `FolderRelationshipProjection` | Derived relationships between documents, folders, and knowledge signals. |
-| Outbox event | `OutboxEvent` | Immutable projection input event emitted with PostgreSQL profile changes. |
+| Knowledge graph | `DocumentRelationshipProjection`, `DocumentSignalGraphProjection`, `FolderRelationshipProjection` | Derived relationships between documents, folders, and document/folder signals. |
+| Outbox event | `OutboxEvent` | Immutable projection input event emitted with PostgreSQL index record and signal changes. |
 
 Important rules:
 
 - Source models are snapshots. The app server remains canonical.
-- Vector projections and AI profiles are rebuildable derived state.
+- Vector projections, index records, and signals are rebuildable derived state.
 - Task outputs are typed. For example, a `summary` output must contain generated text.
 - Host action payloads must match `HostActionType`.
-- DTOs validate API input before mappers build use case commands and queries.
+- DTOs validate API input before mappers build application commands and queries.
 
 ## Data Storage
 
@@ -257,16 +250,15 @@ opaque source metadata and are not promoted into graph or search scope.
 | Table | Primary Key | Stores |
 | --- | --- | --- |
 | `tenant_storage_scopes` | `tenant_id` | Tenant-level AI-Core storage lifecycle and retention scope. |
-| `document_refs`, `folder_refs` | UUID refs | Source identities: `document_id` is the canonical document key and `(tenant_id, folder_id)` is the folder key. `document_type` is optional descriptive metadata only. |
-| `source_document_snapshots`, `source_folder_snapshots` | UUID snapshots | Minimal snapshot manifests: source identity, digest, size, schema version, metadata, and timestamps. Raw source bodies and storage locations are not stored. |
-| `document_index_records`, `document_chunk_sets`, `document_chunks`, `folder_index_records` | UUID records | Current and historical derived indexing manifests and chunk records. |
-| `knowledge_signals` | `signal_id` | Extracted signal text, payload, evidence, confidence, extractor metadata, and source document/version scope. |
-| `vector_projection_records` | UUID projection IDs | Qdrant write ledger. Records track collection, point ID, aggregate/subject identity, payload digest, projected/deleted timestamps, and retention state without source-row FKs. |
-| `outbox_events` | `id` UUID | Kafka/Debezium transactional outbox events. `tenant_id`, `idempotency_key`, `sequence`, and `event_key` are used for stream ordering, idempotency, and dead-letter context. |
-| `retrieval_runs`, `retrieval_results` | UUID run/result IDs | User-facing retrieval request history with query digest, scope, status, result ids, scores, and reasons. Query plaintext is not stored. |
-| `tasks` | `task_id` UUID | Current task aggregate status, active request text, analysis message, current action, error, and metadata. |
-| `task_requests` | `task_request_id` UUID | Ordered user request entries within a task, including active/removed status. |
-| `task_outputs` | `output_id` UUID | Typed task outputs with result payloads and task-local ordering. |
+| `document_sources`, `folder_sources` | Source IDs | Current source manifests: source identity, aggregate source version, digest/size or folder metadata, timestamps, deletion state, and opaque source metadata. Raw source bodies are not stored. |
+| `source_document_folder_relations` | `(tenant_id, document_id, folder_id)` | Current folder membership rows from document relation snapshots. An empty row set is the current empty membership. |
+| `document_index_records`, `document_chunks`, `folder_index_records` | Source IDs / chunk UUIDs | Current derived indexing manifests and document chunk records. |
+| `document_signals`, `folder_signals` | `signal_id` | Extracted signal text, payload, evidence, confidence, extractor metadata, source input digest, generation version, and optional generation model. |
+| `vector_projection_records` | `(collection_name, point_id)` | Qdrant write ledger. Records track collection, point ID, source identity, vector item identity, source input digest, and vector input digest without source-row FKs. |
+| `outbox_events` | `event_id` UUID | Kafka/Debezium transactional outbox events. `tenant_id`, `idempotency_key`, `event_sequence`, `partition_key`, and `event_type` are used for stream ordering, idempotency, and dead-letter context. |
+| `tasks` | `task_id` UUID | Current task aggregate status, active input text, analysis message, current action, error, and metadata. |
+| `task_inputs` | `task_input_id` UUID | Ordered user request entries within a task, including active/removed status. |
+| `task_jobs`, `task_job_results` | UUID job/result IDs | Planned workflow jobs, execution state, typed result payloads, and task-local ordering. |
 | `host_actions` | `action_id` UUID | Proposed host actions with typed input payloads, result payloads, policy JSON, and task-local sequential ordering. |
 | `task_events` | `event_id` UUID | Task event log. |
 
@@ -284,8 +276,8 @@ schema, Kafka outbox, the Qdrant vector ledger, and workflow task tables.
 | Setting | Default Collection | Payload Kind | Purpose |
 | --- | --- | --- | --- |
 | `FOLDMIND_QDRANT_DOCUMENT_CHUNK_COLLECTION` | `document_chunks` | `document_chunk` | Vector search over chunk text. |
-| `FOLDMIND_QDRANT_DOCUMENT_COLLECTION` | `documents` | `document` | Document-level vector search over profile-enriched text. |
-| `FOLDMIND_QDRANT_SIGNAL_COLLECTION` | `signals` | `signal` | Signal-level vector search over extracted knowledge signals. |
+| `FOLDMIND_QDRANT_DOCUMENT_COLLECTION` | `documents` | `document` | Document-level vector search over source text and signal-derived context. |
+| `FOLDMIND_QDRANT_SIGNAL_COLLECTION` | `signals` | `signal` | Signal-level vector search over extracted document and folder signals. |
 | `FOLDMIND_QDRANT_FOLDER_COLLECTION` | `folders` | `folder` | Folder metadata vector search for folder discovery and recommendations. |
 
 ### Graph DB
@@ -296,7 +288,7 @@ indexing always write relationships to the graph DB.
 | Relationship | Meaning |
 | --- | --- |
 | `Document` - `Folder` | Which folders contain a document. |
-| `Document` - `Signal` | Which extracted knowledge signals are attached to a document version. |
+| `Document` - `Signal` | Which extracted signals are attached to a document version. |
 | `Folder` - `Folder` | Folder hierarchy. |
 
 Graph DB relationships are derived data for retrieval quality. The app server
@@ -322,8 +314,13 @@ FastAPI inbound adapter
   routers + API DTOs
         |
         v
-Application use cases
-  indexing / retrieval / recommendation / workflow
+Inbound application ports
+  typed protocols for HTTP and messaging entrypoints
+        |
+        v
+Application services
+  indexing / projection / workflow entrypoints
+  retrieval and recommendation policies live in services + workflow steps
         |
         +-- Domain models
         +-- Agents and prompt services
@@ -342,14 +339,17 @@ Outbound adapters
 | --- | --- |
 | `core/domain/models/` | Business models. No external framework dependencies. |
 | `core/domain/services/` | Pure domain rules such as concept normalization, confidence validation, and outbox invariants. |
-| `core/application/ports/inbound/` | Use case contracts called by the app server. |
+| `core/application/ports/inbound/` | Protocols that inbound adapters call. Concrete application services implement these structurally. |
 | `core/application/ports/outbound/` | Interfaces for LLM providers, embedding providers, PostgreSQL repositories, vector stores, graph store, prompt store, and workflow runtime. |
-| `core/application/use_cases/` | Indexing, retrieval, recommendation, and workflow task orchestration. |
+| `core/application/models/` | Application service commands, queries, results, retrieval models, projection models, and workflow flow-state models. |
+| `core/application/mappers/` | Boundary and domain-to-application mapping functions. |
+| `core/application/services/` | Inbound application API and application policies grouped by indexing, retrieval, recommendation, projection, and workflow responsibility. |
+| `core/application/formatters/`, `execution/`, `prompts.py` | Application support code that is not itself a service. |
 | `core/application/agents/` | Prompt-backed AI tasks. |
 | `core/application/workflows/` | Workflow step execution, artifact storage, and host action result policy. |
 | `adapters/inbound/http/` | FastAPI routers, REST DTOs, and HTTP error mapping. |
 | `adapters/outbound/` | PostgreSQL, Qdrant, graph DB, OpenAI, LangGraph, and file prompt store implementations. |
-| `bootstrap/` | Read settings and wire concrete adapters into use cases. |
+| `bootstrap/` | Read settings and wire concrete adapters and application services behind their ports. |
 
 ## Deployment And Configuration
 
@@ -359,6 +359,7 @@ their own endpoints. Dockerfile and Compose manifests are not present yet.
 
 ```dotenv
 FOLDMIND_POSTGRES_DSN=postgresql://user:password@host:5432/foldmind_ai_core
+PURGE_AFTER_DAYS=90
 
 FOLDMIND_AI_PROVIDER=openai
 FOLDMIND_OPENAI_API_KEY=sk-...
@@ -367,7 +368,7 @@ FOLDMIND_EMBEDDING_MODEL=text-embedding-3-small
 FOLDMIND_EMBEDDING_VERSION=text-embedding-3-small
 FOLDMIND_CHUNKING_VERSION=chunking-v1
 FOLDMIND_INDEX_SCHEMA_VERSION=index-schema-v1
-FOLDMIND_DOCUMENT_PROFILE_PROMPT_VERSION=document-profile-prompt-v1
+FOLDMIND_DOCUMENT_SIGNAL_EXTRACTION_PROMPT_VERSION=document-signal-extraction-prompt-v1
 FOLDMIND_EMBEDDING_DIMENSIONS=1536
 
 FOLDMIND_QDRANT_URL=http://qdrant:6333
@@ -380,7 +381,7 @@ FOLDMIND_NEO4J_PASSWORD=password
 
 `FOLDMIND_POSTGRES_DSN`, `FOLDMIND_QDRANT_URL`, `FOLDMIND_NEO4J_URI`, `FOLDMIND_NEO4J_USER`, `FOLDMIND_NEO4J_PASSWORD`,
 `FOLDMIND_EMBEDDING_VERSION`, `FOLDMIND_CHUNKING_VERSION`, `FOLDMIND_INDEX_SCHEMA_VERSION`,
-and `FOLDMIND_DOCUMENT_PROFILE_PROMPT_VERSION` are required for the standard
+and `FOLDMIND_DOCUMENT_SIGNAL_EXTRACTION_PROMPT_VERSION` are required for the standard
 configured API.
 
 Example environment files:
@@ -401,7 +402,7 @@ foldmind-ai-core/
     bootstrap/     Settings, app factory, and container wiring
     core/
       domain/        Domain models and pure domain services
-      application/   Use cases, ports, agents, and workflow policy
+      application/   Services, ports, agents, and workflow policy
     adapters/      Inbound and outbound concrete adapters
     shared/        Shared primitive types and validation rules
   tests/
@@ -431,7 +432,7 @@ Run one outbox worker per `FOLDMIND_OUTBOX_PROJECTION_TARGET`: `qdrant-document-
 a target-specific consumer group name so each projection target consumes the same
 outbox stream independently.
 The default outbox topic is `indexing-events`; configure Debezium so the Kafka
-message key is the `event_key` column. Failed messages are published to
+message key is the generated `partition_key` column. Failed messages are published to
 `indexing-events.dlq`; replay them with `scripts/replay_dead_letter_events.py` after fixing the
 underlying failure.
 

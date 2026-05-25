@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
 from foldmind_ai_core.core.application.workflows.state.execution import (
     WorkflowArtifacts,
     WorkflowExecutionPlan,
     WorkflowExecutionTrace,
 )
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery
-from foldmind_ai_core.core.domain.models.workflow.actions import HostAction, HostActionResult
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskSnapshot
+from foldmind_ai_core.core.domain.models.host_actions import HostAction, HostActionResult
+from foldmind_ai_core.core.domain.models.tasks import TaskSnapshot
 
 
 @dataclass(slots=True)

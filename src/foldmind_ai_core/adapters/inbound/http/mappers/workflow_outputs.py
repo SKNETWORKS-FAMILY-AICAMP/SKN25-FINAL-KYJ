@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from foldmind_ai_core.adapters.inbound.http.dtos.retrieval import (
-    FolderRecommendationDTO,
-    GeneratedTextResponse,
-)
+from foldmind_ai_core.adapters.inbound.http.dtos.retrieval import FolderRecommendationDTO
 from foldmind_ai_core.adapters.inbound.http.dtos.workflow_outputs import (
     AssistantClarificationDTO,
     DocumentRecommendationDTO,
@@ -12,6 +9,7 @@ from foldmind_ai_core.adapters.inbound.http.dtos.workflow_outputs import (
     DocumentSearchResultDTO,
     DraftResultDTO,
     FolderRecommendationResultDTO,
+    GeneratedTextDTO,
     RelatedRecommendationItemDTO,
     RelatedRecommendationResultDTO,
 )
@@ -21,25 +19,23 @@ from foldmind_ai_core.adapters.inbound.http.mappers.documents import (
 from foldmind_ai_core.adapters.inbound.http.mappers.retrieval import (
     retrieval_result_dto_from_result,
 )
-from foldmind_ai_core.core.application.results.workflow import (
-    AssistantClarificationResult,
-    DocumentRecommendationItemResult,
-    DocumentRecommendationTaskOutputResult,
-    DocumentSearchItemResult,
-    DocumentSearchTaskOutputResult,
-    DraftTaskOutputResult,
-    FolderRecommendationItemResult,
-    FolderRecommendationTaskOutputResult,
-    GeneratedTextTaskOutputResult,
-    RelatedRecommendationItemResult,
-    RelatedRecommendationTaskOutputResult,
+from foldmind_ai_core.core.application.models.generation import (
+    AssistantClarification,
+    DocumentRecommendation,
+    DocumentRecommendationResult,
+    DocumentSearchResult,
+    DraftResult,
+    FolderRecommendation,
+    FolderRecommendationResult,
+    GeneratedTextResult,
+    RelatedRecommendationResult,
 )
 
 
-def generated_text_response_from_result(
-    result: GeneratedTextTaskOutputResult,
-) -> GeneratedTextResponse:
-    return GeneratedTextResponse(
+def generated_text_dto_from_result(
+    result: GeneratedTextResult,
+) -> GeneratedTextDTO:
+    return GeneratedTextDTO(
         text=result.text,
         citations=[
             retrieval_result_dto_from_result(citation)
@@ -49,7 +45,7 @@ def generated_text_response_from_result(
 
 
 def assistant_clarification_dto_from_result(
-    clarification: AssistantClarificationResult,
+    clarification: AssistantClarification,
 ) -> AssistantClarificationDTO:
     return AssistantClarificationDTO(
         question=clarification.question,
@@ -57,7 +53,7 @@ def assistant_clarification_dto_from_result(
     )
 
 
-def draft_result_dto_from_result(result: DraftTaskOutputResult) -> DraftResultDTO:
+def draft_result_dto_from_result(result: DraftResult) -> DraftResultDTO:
     return DraftResultDTO(
         draft=result.draft,
         citations=[
@@ -68,7 +64,7 @@ def draft_result_dto_from_result(result: DraftTaskOutputResult) -> DraftResultDT
 
 
 def document_recommendation_dto_from_result(
-    recommendation: DocumentRecommendationItemResult,
+    recommendation: DocumentRecommendation,
 ) -> DocumentRecommendationDTO:
     return DocumentRecommendationDTO(
         document=retrieved_document_dto_from_result(recommendation.document),
@@ -82,7 +78,7 @@ def document_recommendation_dto_from_result(
 
 
 def document_recommendation_result_dto_from_result(
-    result: DocumentRecommendationTaskOutputResult,
+    result: DocumentRecommendationResult,
 ) -> DocumentRecommendationResultDTO:
     return DocumentRecommendationResultDTO(
         primary=(
@@ -99,7 +95,7 @@ def document_recommendation_result_dto_from_result(
 
 
 def document_search_item_dto_from_result(
-    item: DocumentSearchItemResult,
+    item: DocumentRecommendation,
 ) -> DocumentSearchItemDTO:
     return DocumentSearchItemDTO(
         document=retrieved_document_dto_from_result(item.document),
@@ -113,7 +109,7 @@ def document_search_item_dto_from_result(
 
 
 def document_search_result_dto_from_result(
-    result: DocumentSearchTaskOutputResult,
+    result: DocumentSearchResult,
 ) -> DocumentSearchResultDTO:
     return DocumentSearchResultDTO(
         items=[
@@ -124,8 +120,8 @@ def document_search_result_dto_from_result(
     )
 
 
-def folder_recommendation_dto_from_task_result(
-    recommendation: FolderRecommendationItemResult,
+def folder_recommendation_dto_from_result(
+    recommendation: FolderRecommendation,
 ) -> FolderRecommendationDTO:
     return FolderRecommendationDTO(
         folder_id=recommendation.folder_id,
@@ -135,12 +131,12 @@ def folder_recommendation_dto_from_task_result(
 
 
 def folder_recommendation_result_dto_from_result(
-    result: FolderRecommendationTaskOutputResult,
+    result: FolderRecommendationResult,
 ) -> FolderRecommendationResultDTO:
     return FolderRecommendationResultDTO(
-        primary=folder_recommendation_dto_from_task_result(result.primary),
+        primary=folder_recommendation_dto_from_result(result.primary),
         alternatives=[
-            folder_recommendation_dto_from_task_result(recommendation)
+            folder_recommendation_dto_from_result(recommendation)
             for recommendation in result.alternatives
         ],
         confidence=result.confidence,
@@ -148,26 +144,26 @@ def folder_recommendation_result_dto_from_result(
 
 
 def related_recommendation_item_dto_from_result(
-    item: RelatedRecommendationItemResult,
+    item: DocumentRecommendation | FolderRecommendation,
 ) -> RelatedRecommendationItemDTO:
     return RelatedRecommendationItemDTO(
         score=item.score,
         reason=item.reason,
         document=(
-            document_recommendation_dto_from_result(item.document)
-            if item.document is not None
+            document_recommendation_dto_from_result(item)
+            if isinstance(item, DocumentRecommendation)
             else None
         ),
         folder=(
-            folder_recommendation_dto_from_task_result(item.folder)
-            if item.folder is not None
+            folder_recommendation_dto_from_result(item)
+            if isinstance(item, FolderRecommendation)
             else None
         ),
     )
 
 
 def related_recommendation_result_dto_from_result(
-    result: RelatedRecommendationTaskOutputResult,
+    result: RelatedRecommendationResult,
 ) -> RelatedRecommendationResultDTO:
     return RelatedRecommendationResultDTO(
         items=[

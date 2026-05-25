@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import unittest
 
-from foldmind_ai_core.core.application.services.retrieved_context import (
+from foldmind_ai_core.core.application.formatters.retrieved_context import (
     format_untrusted_context,
 )
-from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
-from foldmind_ai_core.core.domain.models.retrieval.results import RetrievalResult
+from foldmind_ai_core.core.application.models.retrieval import RetrievalResult
+from foldmind_ai_core.core.domain.models.document_chunks import DocumentChunk
 from foldmind_ai_core.shared.validation import InvalidInputError
 
 
@@ -44,14 +44,9 @@ def _retrieval_result(score: float) -> RetrievalResult:
             updated_at="2026-05-02T11:00:00+09:00",
             chunk_id="doc-1:chunk:0",
             chunk_index=0,
-            chunking_version="chunking-test-v1",
             text=text,
-            text_hash="hash-1",
             start_offset=0,
             end_offset=len(text),
-            embedding_model="test-embedding",
-            embedding_version="test-v1",
-            index_schema_version="schema-v1",
         ),
         score=score,
     )

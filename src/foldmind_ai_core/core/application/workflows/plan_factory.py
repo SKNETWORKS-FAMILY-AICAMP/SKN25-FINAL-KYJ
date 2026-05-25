@@ -3,14 +3,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TypeVar
 
+from foldmind_ai_core.core.application.workflows.state.json_values import json_object_value
 from foldmind_ai_core.core.application.workflows.state.plan import (
     WorkflowAction,
     WorkflowActionType,
+    WorkflowParams,
     WorkflowPlan,
     WorkflowRiskLevel,
-    WorkflowParams,
 )
-from foldmind_ai_core.core.application.workflows.state.json_values import json_object_value
 
 _E = TypeVar("_E", WorkflowActionType, WorkflowRiskLevel)
 
@@ -61,7 +61,7 @@ def workflow_action_from_mapping(payload: object) -> WorkflowAction:
             _required_value(payload, "type"),
             "type",
         ),
-        reason=_optional_string(payload.get("reason"), "reason", default=""),
+        reason=_optional_string(payload.get("reason"), "reason", default="") or "",
         params=_params_value(payload.get("params", {})),
         requires_confirmation=_bool_value(
             payload.get("requires_confirmation", False),
@@ -109,4 +109,3 @@ def _bool_value(value: object, name: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{name} must be a boolean.")
     return value
-

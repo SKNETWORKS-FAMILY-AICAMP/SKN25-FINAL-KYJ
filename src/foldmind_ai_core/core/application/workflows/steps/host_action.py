@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
 from foldmind_ai_core.core.application.workflows.state.execution import (
     StepOutcome,
     WorkflowArtifactName,
 )
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
 from foldmind_ai_core.core.application.workflows.steps.options import requested_host_actions
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery
-from foldmind_ai_core.core.domain.models.workflow.actions import ActionPlan
+from foldmind_ai_core.core.domain.models.host_actions import ActionPlan
 from foldmind_ai_core.shared.types import JsonObject
 
 if TYPE_CHECKING:

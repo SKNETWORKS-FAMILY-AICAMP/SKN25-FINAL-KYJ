@@ -82,7 +82,7 @@ class WorkflowAction:
             self.action_type,
             "action_type",
         )
-        self.reason = _optional_string(self.reason, "reason", default="")
+        self.reason = _optional_string(self.reason, "reason", default="") or ""
         self.requires_confirmation = _bool_value(
             self.requires_confirmation,
             "requires_confirmation",
@@ -185,4 +185,3 @@ def _instruction_param_value(value: object, name: str) -> str:
     if not normalized:
         raise ValueError(f"{name} must be a non-blank string.")
     return normalized
-

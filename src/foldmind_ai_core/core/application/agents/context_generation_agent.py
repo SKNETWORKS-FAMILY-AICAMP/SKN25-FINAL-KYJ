@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from foldmind_ai_core.core.application.models.llm import LLMMessage
-from foldmind_ai_core.core.application.services.prompts import (
-    TOKEN_UNTRUSTED_CONTEXT_INSTRUCTION,
-    render_prompt,
-)
-from foldmind_ai_core.core.application.services.retrieved_context import (
+from foldmind_ai_core.core.application.formatters.retrieved_context import (
     UNTRUSTED_CONTEXT_INSTRUCTION,
     format_untrusted_context,
 )
-from foldmind_ai_core.core.application.ports.outbound.llm import LLMProvider
-from foldmind_ai_core.core.application.ports.outbound.prompt_store import PromptStore
-from foldmind_ai_core.core.domain.models.generation.results import GeneratedTextResult
-from foldmind_ai_core.core.domain.models.retrieval.results import RetrievalResult
+from foldmind_ai_core.core.application.models.llm import LLMMessage
+from foldmind_ai_core.core.application.ports.outbound.provider.llm import LLMProvider
+from foldmind_ai_core.core.application.ports.outbound.provider.prompt_store import PromptStore
+from foldmind_ai_core.core.application.prompts import (
+    TOKEN_UNTRUSTED_CONTEXT_INSTRUCTION,
+    render_prompt,
+)
+from foldmind_ai_core.core.application.models.generation import GeneratedTextResult
+from foldmind_ai_core.core.application.models.retrieval import RetrievalResult
 
 
 @dataclass(slots=True)
@@ -22,7 +22,7 @@ class ContextGenerationAgent:
     llm: LLMProvider
     prompt_store: PromptStore
 
-    def generate(
+    async def generate(
         self,
         *,
         prompt_name: str,
@@ -30,7 +30,7 @@ class ContextGenerationAgent:
         citations: list[RetrievalResult],
     ) -> GeneratedTextResult:
         context = format_untrusted_context(citations)
-        text = self.llm.generate(
+        text = await self.llm.generate(
             [
                 LLMMessage(
                     role="system",

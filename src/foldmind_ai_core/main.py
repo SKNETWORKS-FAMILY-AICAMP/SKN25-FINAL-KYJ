@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from foldmind_ai_core.bootstrap.configured_app import build_configured_app
+from foldmind_ai_core.bootstrap.container.application import ApplicationContainer
 
-app = build_configured_app()
+app = ApplicationContainer().fastapi_app()

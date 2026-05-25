@@ -49,26 +49,28 @@ class FakeDispatcher:
         self.failures_before_success = failures_before_success
         self.events: list[object] = []
 
-    def consume_outbox_event(self, event: object) -> None:
+    async def consume_outbox_event(self, event: object) -> None:
         self.events.append(event)
         if len(self.events) <= self.failures_before_success:
             raise RuntimeError("projection failed")
 
 
-class OutboxRuntimeTests(unittest.TestCase):
+class OutboxRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def test_retry_policy_rejects_non_finite_backoff(self) -> None:
         with self.assertRaises(ValueError):
             RetryPolicy(max_retries=1, backoff_seconds=float("nan"))
         with self.assertRaises(ValueError):
             RetryPolicy(max_retries=True, backoff_seconds=0)
 
-    def test_projection_message_consumer_commits_after_successful_projection(self) -> None:
+    async def test_projection_message_consumer_commits_after_successful_projection(
+        self,
+    ) -> None:
         consumer = FakeBrokerConsumer()
         dead_letter = FakeDeadLetterProducer()
         dispatcher = FakeDispatcher()
         message = _flattened_broker_message()
 
-        OutboxProjectionMessageConsumer(
+        await OutboxProjectionMessageConsumer(
             dispatcher=dispatcher,
             dead_letter_producer=dead_letter,
             dead_letter_topic="indexing-events.dlq",
@@ -79,13 +81,15 @@ class OutboxRuntimeTests(unittest.TestCase):
         self.assertEqual(len(dead_letter.published), 0)
         self.assertEqual(len(dispatcher.events), 1)
 
-    def test_projection_message_consumer_does_not_commit_before_retry_succeeds(self) -> None:
+    async def test_projection_message_consumer_does_not_commit_before_retry_succeeds(
+        self,
+    ) -> None:
         consumer = FakeBrokerConsumer()
         dead_letter = FakeDeadLetterProducer()
         dispatcher = FakeDispatcher(failures_before_success=1)
         committed_during_sleep: list[int] = []
 
-        OutboxProjectionMessageConsumer(
+        await OutboxProjectionMessageConsumer(
             dispatcher=dispatcher,
             dead_letter_producer=dead_letter,
             dead_letter_topic="indexing-events.dlq",
@@ -98,7 +102,7 @@ class OutboxRuntimeTests(unittest.TestCase):
         self.assertEqual(len(dead_letter.published), 0)
         self.assertEqual(len(dispatcher.events), 2)
 
-    def test_projection_message_consumer_publishes_dead_letter_and_commits_after_retry_exhaustion(
+    async def test_projection_message_consumer_dead_letters_after_retry_exhaustion(
         self,
     ) -> None:
         consumer = FakeBrokerConsumer()
@@ -106,7 +110,7 @@ class OutboxRuntimeTests(unittest.TestCase):
         dispatcher = FakeDispatcher(failures_before_success=10)
         message = _flattened_broker_message()
 
-        OutboxProjectionMessageConsumer(
+        await OutboxProjectionMessageConsumer(
             dispatcher=dispatcher,
             dead_letter_producer=dead_letter,
             dead_letter_topic="indexing-events.dlq",
@@ -128,6 +132,7 @@ class OutboxRuntimeTests(unittest.TestCase):
             "document:tenant-1:doc-1",
         )
         self.assertEqual(value["event"]["tenant"], "tenant-1")
+
 
 def _flattened_broker_message(*, event_sequence: int = 10) -> BrokerMessage:
     return BrokerMessage(

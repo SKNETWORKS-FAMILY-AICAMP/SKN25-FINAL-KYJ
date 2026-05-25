@@ -4,25 +4,25 @@ from foldmind_ai_core.adapters.inbound.http.dtos.retrieval import RetrievalResul
 from foldmind_ai_core.adapters.inbound.http.mappers.transport_values import (
     transport_value,
 )
-from foldmind_ai_core.core.application.results.retrieval import RetrievedChunkResult
+from foldmind_ai_core.core.application.models.retrieval import RetrievalResult
 
 
 def retrieval_result_dto_from_result(
-    result: RetrievedChunkResult,
+    result: RetrievalResult,
 ) -> RetrievalResultDTO:
+    chunk = result.chunk
     return RetrievalResultDTO(
-        tenant=result.tenant,
-        document_type=result.document_type,
-        document_id=result.document_id,
-        source_version=result.source_version,
-        created_at=result.created_at,
-        updated_at=result.updated_at,
-        chunk_id=result.chunk_id,
-        chunk_index=result.chunk_index,
-        text=result.text,
+        tenant=chunk.tenant,
+        document_type=chunk.document_type,
+        document_id=chunk.document_id,
+        source_version=chunk.source_version,
+        created_at=chunk.created_at,
+        updated_at=chunk.updated_at,
+        chunk_id=chunk.chunk_id,
+        chunk_index=chunk.chunk_index,
+        text=chunk.text,
         score=result.score,
-        start_offset=result.start_offset,
-        end_offset=result.end_offset,
-        metadata=transport_value(result.metadata),
+        start_offset=chunk.start_offset,
+        end_offset=chunk.end_offset,
+        metadata=transport_value(chunk.metadata),
     )
-

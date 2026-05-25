@@ -12,10 +12,10 @@ from foldmind_ai_core.bootstrap.settings import APISettings
 _WORKFLOW_CHECKPOINTER_CONTEXTS: list[Any] = []
 
 
-def build_workflow_checkpointer(settings: APISettings) -> Any:
+def _build_workflow_checkpointer(settings: APISettings) -> Any:
     checkpoint_dsn = settings.workflow_checkpoint_dsn or settings.postgres_dsn
     if checkpoint_dsn:
-        return build_postgres_workflow_checkpointer(checkpoint_dsn)
+        return _build_postgres_workflow_checkpointer(checkpoint_dsn)
     if settings.allow_in_memory_workflow_checkpoint:
         return InMemorySaver(serde=langgraph_checkpoint_serializer())
     raise RuntimeError(
@@ -25,7 +25,7 @@ def build_workflow_checkpointer(settings: APISettings) -> Any:
     )
 
 
-def build_postgres_workflow_checkpointer(dsn: str) -> Any:
+def _build_postgres_workflow_checkpointer(dsn: str) -> Any:
     from langgraph.checkpoint.postgres import PostgresSaver
 
     from_conn_string: Any = PostgresSaver.from_conn_string
@@ -38,3 +38,9 @@ def build_postgres_workflow_checkpointer(dsn: str) -> Any:
         checkpointer = checkpointer_source.__enter__()
         _WORKFLOW_CHECKPOINTER_CONTEXTS.append(checkpointer_source)
     return checkpointer
+
+
+async def close_workflow_checkpointer_contexts() -> None:
+    while _WORKFLOW_CHECKPOINTER_CONTEXTS:
+        context = _WORKFLOW_CHECKPOINTER_CONTEXTS.pop()
+        context.__exit__(None, None, None)

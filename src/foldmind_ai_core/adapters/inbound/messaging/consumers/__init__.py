@@ -1,1 +1,0 @@
-"""Projection event consumer implementations."""

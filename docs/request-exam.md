@@ -24,16 +24,16 @@
 - `context`를 보낼 때는 `requested_at`, `document_id`, `folder_id` 중 하나 이상이 있어야 한다. 빈 객체 `{}`는 422다.
 - `context.requested_at`은 timezone-aware ISO timestamp여야 한다. naive timestamp는 422다.
 - `context.document_id`와 `context.folder_id`는 UUID여야 한다.
-- `POST /tasks/{task_id}/requests`는 기존 task에 요청을 추가한다. append context에 `document_id`/`folder_id`가 없으면 마지막 active request context를 상속한다.
-- `DELETE /tasks/requests/{task_request_id}`는 request entry를 removed로 표시하고 active request로 다시 planning한다.
+- `POST /tasks/{task_id}/inputs`는 기존 task에 요청을 추가한다. append context에 `document_id`/`folder_id`가 없으면 마지막 active input context를 상속한다.
+- `DELETE /tasks/inputs/{task_input_id}`는 input entry를 removed로 표시하고 active input으로 다시 planning한다.
 - 현재 Task HTTP DTO는 선택 텍스트, 원문 본문, 여러 문서 ID, project ID, folder hierarchy snapshot, document version scope, metadata list filter를 받지 않는다.
 
 ## 현재 Task 요청 플로우
 
-1. `POST /tasks`: DTO 검증 -> `CreateTaskCommand` -> `RunTaskUseCase` -> `WorkflowRequestQueue.initial_snapshot` -> `TaskRepository.create` -> workflow planning/execution -> `TaskRepository.save` -> `TaskSnapshotResponse`.
-2. `POST /tasks/{task_id}/requests`: 기존 task 조회 -> `WorkflowRequestQueue.append_request` -> active request text를 줄바꿈으로 병합 -> context 상속/갱신 -> workflow 재실행 -> 저장.
-3. `DELETE /tasks/requests/{task_request_id}`: request entry 제거 표시 -> active request/context 재계산 -> active request가 남으면 workflow 재실행, 없으면 `Task has no active requests.`로 저장.
-4. `POST /tasks/actions/result`: host action 결과 기록 -> checkpoint에서 workflow resume.
+1. `POST /tasks`: DTO 검증 -> `CreateTaskCommand` -> `TaskWorkflowService.create_task` -> `WorkflowInputService.initial_snapshot` -> task session create -> workflow planning/execution -> task session `save_if_revision` -> `TaskSnapshotResponse`.
+2. `POST /tasks/{task_id}/inputs`: DTO 검증 -> `AppendTaskInputCommand` -> `TaskWorkflowService.append_task_input` -> 기존 task 조회 -> `WorkflowInputService.append_input` -> active input text를 줄바꿈으로 병합 -> context 상속/갱신 -> workflow 재실행 -> task session `save_if_revision`.
+3. `DELETE /tasks/inputs/{task_input_id}`: DTO 검증 -> `RemoveTaskInputCommand` -> `TaskWorkflowService.remove_task_input` -> input entry 제거 표시 -> active input/context 재계산 -> active input이 남으면 workflow 재실행, 없으면 `Task has no active inputs.`로 task session `save_if_revision`.
+4. `POST /tasks/actions/result`: DTO 검증 -> `RecordActionResultCommand` -> `TaskWorkflowService.record_action_result` -> host action 결과 기록 -> checkpoint에서 workflow resume.
 
 ## 현재 planner/step 기준
 
@@ -45,7 +45,7 @@
 - 키워드/주제/개념/엔티티: `find_signals(signal_type=concept/entity) -> synthesize_signals`.
 - 초안/재작성: `find_documents -> generate_draft(params.instruction)`. 새 문서 생성까지 요구하면 `plan_host_actions(create_document)`가 붙을 수 있다.
 - 아이디어 확장: `find_documents -> explore_ideas(params.instruction)`.
-- 폴더 추천: `find_folders -> recommend_folder`. 단 Task HTTP DTO는 문서 본문 snapshot을 받지 않고, `recommend_folder`도 `context.document_id`로 원문을 조회하지 않는다.
+- 폴더 추천: `find_folders -> recommend_folder`. `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용하고, 없으면 요청 텍스트나 task document metadata를 source로 사용한다.
 - 현재 문서/폴더 요청은 planner가 `source_scope=current_document/current_folder`를 선택해야 `context.document_id/folder_id`가 검색 scope로 주입된다. context가 없으면 compiler가 `request_clarification` 한 step으로 바꾼다.
 - signal vector 검색은 document/folder scope는 받지만 created_at/updated_at temporal scope를 지원하지 않는다. 따라서 “최근 결정사항/이번 주 할 일”처럼 signal 분석과 날짜 필터가 동시에 필요한 요청은 조건부다.
 
@@ -53,7 +53,7 @@
 
 - `적절`: 현재 Task schema와 planner/step만으로 사용자-facing 결과를 비교적 안정적으로 만들 수 있다.
 - `조건부 적절`: 비슷한 step은 있지만 source, scope, ranking, batch 대상, 선택 텍스트, 비교 대상, 날짜 signal scope, 또는 output 품질이 현재 retrieval/planner에 의존한다.
-- `부적절`: 현재 Task API/step으로 핵심 입력 또는 출력 계약을 표현할 수 없어 별도 schema/use case/host action이 먼저 필요하다.
+- `부적절`: 현재 Task API/step으로 핵심 입력 또는 출력 계약을 표현할 수 없어 별도 schema/application service/host action이 먼저 필요하다.
 
 ## 전체 요청 재작성 표
 
@@ -133,10 +133,10 @@
 
 | 원문 요청 | Task로 보낼 요청/컨텍스트 | 판단 | 현재 처리 또는 한계 |
 |---|---|---|---|
-| 이 문서를 어느 폴더에 넣으면 좋을지 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
-| 이 문서에 어울리는 폴더를 찾아줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
-| 내 폴더 중 이 문서와 가장 관련 있는 곳을 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
-| 이 문서는 새 폴더를 만드는 게 좋을까, 기존 폴더에 넣는 게 좋을까? | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
+| 이 문서를 어느 폴더에 넣으면 좋을지 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
+| 이 문서에 어울리는 폴더를 찾아줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
+| 내 폴더 중 이 문서와 가장 관련 있는 곳을 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
+| 이 문서는 새 폴더를 만드는 게 좋을까, 기존 폴더에 넣는 게 좋을까? | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
 | 이 문서와 비슷한 문서들이 들어있는 폴더를 찾아줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `source_scope=current_document`는 가능하지만 related anchor/exclude-current-doc 처리가 고정되어 있지 않다. |
 ### 폴더 구조 개선
 
@@ -153,12 +153,12 @@
 
 | 원문 요청 | Task로 보낼 요청/컨텍스트 | 판단 | 현재 처리 또는 한계 |
 |---|---|---|---|
-| 정리되지 않은 문서들을 적절한 폴더로 분류해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 최근 만든 문서들을 알맞은 폴더에 넣을 수 있게 추천해줘. | `request`는 원문 그대로 보낼 수 있으나, 현재 문서 본문 snapshot을 Task가 받지 못해 추천 품질은 제한된다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
-| 폴더 없는 문서들을 정리해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 정리되지 않은 문서들을 적절한 폴더로 분류해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 최근 만든 문서들을 알맞은 폴더에 넣을 수 있게 추천해줘. | `request`는 원문 그대로 보낼 수 있으나, 대상 문서 목록을 직접 고정하지 못해 추천 품질은 retrieval에 의존한다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
+| 폴더 없는 문서들을 정리해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
 | 내 문서들을 업무, 개인, 아이디어, 학습으로 나눠줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents(require_comprehensive_search=true) -> classify_documents -> analyze_documents -> synthesize_report`로 시도할 수 있지만 전체 문서 순회/고정된 batch 대상은 없다. |
-| 중요한 문서와 임시 문서를 구분해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 오래된 문서 중 보관용으로 옮길 만한 것들을 찾아줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 중요한 문서와 임시 문서를 구분해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 오래된 문서 중 보관용으로 옮길 만한 것들을 찾아줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
 ## 4. 관련 문서 추천 요청
 
 | 원문 요청 | Task로 보낼 요청/컨텍스트 | 판단 | 현재 처리 또는 한계 |
@@ -297,21 +297,21 @@
 | 이 문서에 근거가 부족한 주장을 찾아줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_document`, `find_documents -> answer_question`; `context.document_id` 누락 시 `request_clarification`. |
 | 이 문서와 관련된 자료가 더 필요한 부분을 알려줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `source_scope=current_document`, `find_documents -> answer_question`; `context.document_id` 누락 시 `request_clarification`. |
 | 내가 같은 내용을 여러 번 적은 문서가 있는지 확인해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
-| 오래된 정보가 들어있는 문서를 찾아줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/use case가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
+| 오래된 정보가 들어있는 문서를 찾아줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/application service가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
 | 현재 문서 구조에서 빈틈이 있는 부분을 알려줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_document`, `find_documents -> answer_question`; `context.document_id` 누락 시 `request_clarification`. |
 ## 11. 이름 / 제목 / 태그 추천 요청
 
 | 원문 요청 | Task로 보낼 요청/컨텍스트 | 판단 | 현재 처리 또는 한계 |
 |---|---|---|---|
 | 이 문서 제목을 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_document`, `find_documents -> answer_question`; `context.document_id` 누락 시 `request_clarification`. |
-| 이 폴더 이름을 더 명확하게 바꿔줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/use case가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
+| 이 폴더 이름을 더 명확하게 바꿔줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/application service가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
 | 이 문서에 어울리는 키워드를 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_document`, `find_documents -> answer_question`; `context.document_id` 누락 시 `request_clarification`. |
 | 이 문서를 분류하기 좋은 태그를 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_document`, `find_signals(signal_type=summary) -> synthesize_signals`; `context.document_id` 누락 시 `request_clarification`. |
-| 이 폴더 안 문서들을 보고 폴더 이름을 다시 지어줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/use case가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
+| 이 폴더 안 문서들을 보고 폴더 이름을 다시 지어줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/application service가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
 | 비슷한 문서들을 묶을 수 있는 카테고리 이름을 추천해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
 | 이 문서의 핵심 주제를 한 단어로 표현해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_document`, `find_signals(signal_type=summary) -> synthesize_signals`; `context.document_id` 누락 시 `request_clarification`. |
 | 문서 제목이 너무 애매한 것들을 찾아서 개선안을 줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
-| 내 폴더 이름들을 더 일관성 있게 정리해줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/use case가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
+| 내 폴더 이름들을 더 일관성 있게 정리해줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/application service가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
 ## 12. 지식 정리 / 구조화 요청
 
 | 원문 요청 | Task로 보낼 요청/컨텍스트 | 판단 | 현재 처리 또는 한계 |
@@ -413,22 +413,22 @@
 
 | 원문 요청 | Task로 보낼 요청/컨텍스트 | 판단 | 현재 처리 또는 한계 |
 |---|---|---|---|
-| 임시 문서들을 정리해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 제목 없는 문서들에 제목을 붙여줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 내용이 거의 없는 문서를 찾아줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 임시 문서들을 정리해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 제목 없는 문서들에 제목을 붙여줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 내용이 거의 없는 문서를 찾아줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
 | 정리가 필요한 문서들을 알려줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> summarize_documents/answer_question`; 전체 corpus 보장은 없고 retrieval 후보 중심이다. |
-| 오래 방치된 문서를 찾아줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 나중에 봐야 할 문서와 삭제해도 될 문서를 구분해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 폴더에 안 들어간 문서들을 정리해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 최근 작성했지만 정리 안 된 문서들을 보여줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/use case가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
-| 내 문서 중 초안 상태인 것들을 찾아줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 완성도가 높은 문서와 낮은 문서를 구분해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 오래 방치된 문서를 찾아줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 나중에 봐야 할 문서와 삭제해도 될 문서를 구분해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 폴더에 안 들어간 문서들을 정리해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 최근 작성했지만 정리 안 된 문서들을 보여줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/application service가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
+| 내 문서 중 초안 상태인 것들을 찾아줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 완성도가 높은 문서와 낮은 문서를 구분해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
 ## 20. 자연어 명령형 요청
 
 | 원문 요청 | Task로 보낼 요청/컨텍스트 | 판단 | 현재 처리 또는 한계 |
 |---|---|---|---|
 | 내 문서 좀 정리해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> summarize_documents/answer_question`; 전체 corpus 보장은 없고 retrieval 후보 중심이다. |
-| 이거 어디에 넣어야 할지 알려줘. | `request`는 원문 그대로 보낼 수 있으나, 현재 문서 본문 snapshot을 Task가 받지 못해 추천 품질은 제한된다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
+| 이거 어디에 넣어야 할지 알려줘. | `request`는 원문 그대로 보낼 수 있으나, `context.document_id`가 없으면 요청 텍스트 기반 추천에 의존한다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
 | 중요한 것만 뽑아줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
 | 나중에 다시 볼 만한 것들만 모아줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> present_documents`; 날짜 힌트는 `params.temporal`로 `created_at`/`updated_at` scope가 된다. |
 | 이 내용 기반으로 다음에 뭘 해야 할지 알려줘. | 선택 텍스트/본문을 직접 보낼 수 없으므로 현재는 원문을 문서로 저장한 뒤 `context.document_id`를 붙여 보낸다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
@@ -444,7 +444,7 @@
 | 이거 정리해줘. | App Server가 UI 대상에 맞춰 현재 문서/폴더 요청으로 풀어 쓰고 해당 context id를 붙인다. | 조건부 적절 | `find_documents -> summarize_documents/answer_question`; 전체 corpus 보장은 없고 retrieval 후보 중심이다. |
 | 이거 뭔 내용이야? | App Server가 UI 대상에 맞춰 현재 문서/폴더 요청으로 풀어 쓰고 해당 context id를 붙인다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
 | 이거 중요한 거야? | App Server가 UI 대상에 맞춰 현재 문서/폴더 요청으로 풀어 쓰고 해당 context id를 붙인다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
-| 이거 어디에 둬야 해? | `request`는 원문 그대로 보낼 수 있으나, 현재 문서 본문 snapshot을 Task가 받지 못해 추천 품질은 제한된다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
+| 이거 어디에 둬야 해? | `request`는 원문 그대로 보낼 수 있으나, `context.document_id`가 없으면 요청 텍스트 기반 추천에 의존한다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
 | 비슷한 거 또 있어? | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
 | 전에 이런 거 쓴 적 있지 않아? | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
 | 내가 이거 왜 적었을까? | App Server가 UI 대상에 맞춰 현재 문서/폴더 요청으로 풀어 쓰고 해당 context id를 붙인다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
@@ -460,7 +460,7 @@
 | 내 문서들을 의미적으로 비슷한 것끼리 클러스터링해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
 | 내 지식 베이스에서 이 주제와 가장 가까운 문서들을 찾아줘. | 선택 텍스트/본문을 직접 보낼 수 없으므로 현재는 원문을 문서로 저장한 뒤 `context.document_id`를 붙여 보낸다. | 조건부 적절 | `find_documents -> present_documents`; 날짜 힌트는 `params.temporal`로 `created_at`/`updated_at` scope가 된다. |
 | 최근 문서들을 기반으로 관심사 변화를 분석해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_signals(signal_type=concept) -> synthesize_signals`가 의도된 경로지만 날짜 scope는 signal 검색에서 제한된다. |
-| 내 폴더 구조가 실제 문서 내용과 잘 맞는지 평가해줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/use case가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
+| 내 폴더 구조가 실제 문서 내용과 잘 맞는지 평가해줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/application service가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
 | 문서 간 관계를 기반으로 추천 구조를 만들어줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> generate_draft`; 새 문서 생성까지 요구하면 `plan_host_actions(create_document)`가 추가된다. |
 | 내 문서 전체에서 반복되는 문제-해결 패턴을 찾아줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> present_documents`; 날짜 힌트는 `params.temporal`로 `created_at`/`updated_at` scope가 된다. |
 | 이 문서가 어떤 기존 맥락과 연결되는지 설명해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `source_scope=current_document`, `find_signals(signal_type=summary) -> synthesize_signals`; `context.document_id` 누락 시 `request_clarification`. |
@@ -475,7 +475,7 @@
 | 이 문서를 분석해서 적절한 폴더를 추천하고, 비슷한 문서도 같이 보여줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `source_scope=current_document`는 가능하지만 related anchor/exclude-current-doc 처리가 고정되어 있지 않다. |
 | 내 아이디어 문서들을 모아서 사업화 가능성이 높은 순서로 정리해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> explore_ideas/answer_question`; 선택 본문이 없으면 검색 evidence에 의존한다. |
 | 회의록들을 분석해서 결정사항, 미정사항, 액션 아이템으로 나눠줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 적절 | `find_signals(signal_type=commitment) -> expand_signal_evidence(필요 시) -> synthesize_signals`. |
-| 정리되지 않은 문서들을 찾아서 폴더 추천까지 해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 정리되지 않은 문서들을 찾아서 폴더 추천까지 해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
 | 이 폴더 안 문서들을 하나의 보고서 초안으로 만들어줘. | `request`는 원문 그대로, `context.folder_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_folder`, `find_documents -> generate_draft`; `context.folder_id` 누락 시 `request_clarification`. |
 | 내 문서들을 보고 이번 주에 집중해야 할 일을 추천해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_signals(signal_type=commitment) -> synthesize_signals`가 의도된 경로지만 signal vector scope는 created_at/updated_at 필터를 지원하지 않아 날짜 조건은 조건부다. |
 | 내가 적어둔 목표와 실제 진행 문서를 비교해서 부족한 부분을 알려줘. | `selected_document_ids` 또는 version scope가 생긴 뒤 비교 요청으로 보낸다. | 부적절 | Task request에는 비교 대상 문서 ID 목록이나 version scope가 없다. |
@@ -504,8 +504,8 @@
 
 | 원문 요청 | Task로 보낼 요청/컨텍스트 | 판단 | 현재 처리 또는 한계 |
 |---|---|---|---|
-| 이 문서를 어느 폴더에 넣으면 좋을지 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
-| 내 문서 구조를 보고 새 폴더가 필요한지 알려줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/use case가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
+| 이 문서를 어느 폴더에 넣으면 좋을지 추천해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
+| 내 문서 구조를 보고 새 폴더가 필요한지 알려줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/application service가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
 | 관련 문서를 추천해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> recommend_documents`; anchor나 제외 대상이 필요하면 현재 schema로는 조건부다. |
 ### 구조화 능력 테스트
 
@@ -527,7 +527,7 @@
 |---|---|---|---|
 | 내 문서 좀 정리해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> summarize_documents/answer_question`; 전체 corpus 보장은 없고 retrieval 후보 중심이다. |
 | 이 문서 요약해줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_document`, `find_signals(signal_type=summary) -> synthesize_signals`; `context.document_id` 누락 시 `request_clarification`. |
-| 이거 어디 폴더에 넣어야 해? | `request`는 원문 그대로 보낼 수 있으나, 현재 문서 본문 snapshot을 Task가 받지 못해 추천 품질은 제한된다. | 조건부 적절 | `find_folders -> recommend_folder`; 단 `recommend_folder`는 `context.document_id`로 문서 snapshot을 조회하지 않는다. |
+| 이거 어디 폴더에 넣어야 해? | `request`는 원문 그대로 보낼 수 있으나, `context.document_id`가 없으면 요청 텍스트 기반 추천에 의존한다. | 조건부 적절 | `find_folders -> recommend_folder`; `context.document_id`가 있으면 현재 indexed document source와 signal projection을 recommendation source로 사용한다. |
 | 비슷한 문서 찾아줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> present_documents`; 날짜 힌트는 `params.temporal`로 `created_at`/`updated_at` scope가 된다. |
 | 전에 이런 내용 쓴 적 있어? | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
 | 최근에 쓴 문서 보여줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 적절 | `find_documents -> present_documents`; 날짜 힌트는 `params.temporal`로 `created_at`/`updated_at` scope가 된다. |
@@ -541,8 +541,8 @@
 | 내 메모를 주제별로 묶어줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_signals(signal_type=concept/entity) -> synthesize_signals`. |
 | 이 프로젝트 관련 문서 모아줘. | 프로젝트가 폴더라면 `context.folder_id`를 붙여 현재 폴더 요청으로 바꾸고, 아니면 프로젝트명을 request에 명시한다. | 조건부 적절 | `find_documents -> present_documents`; 날짜 힌트는 `params.temporal`로 `created_at`/`updated_at` scope가 된다. |
 | 내가 요즘 뭘 많이 적었는지 알려줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> answer_question`; 요청 대상이 모호하면 retrieval 후보에 의존한다. |
-| 오래된 문서 정리해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review use case가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
-| 폴더 구조 추천해줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/use case가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
+| 오래된 문서 정리해줘. | 문서 상태/메타데이터 목록 필터를 받는 전용 list/review application service가 먼저 필요하다. | 부적절 | Task request에는 metadata/list filter와 상태 기반 batch 대상 지정이 없다. |
+| 폴더 구조 추천해줘. | 현재 Task schema로는 핵심 입력을 표현할 수 없어 전용 schema/application service가 먼저 필요하다. | 부적절 | 현재 workflow step으로 핵심 입력이나 출력 계약을 안정적으로 만들 수 없다. |
 | 이 문서에서 할 일 뽑아줘. | `request`는 원문 그대로, `context.document_id`를 반드시 함께 보낸다. | 적절 | `source_scope=current_document`, `find_documents -> answer_question`; `context.document_id` 누락 시 `request_clarification`. |
 | 회의록 정리해줘. | `request`는 원문 그대로 보내고, `tenant`와 `context.requested_at`을 함께 둔다. | 조건부 적절 | `find_documents -> summarize_documents/answer_question`; 전체 corpus 보장은 없고 retrieval 후보 중심이다. |
 | 이 아이디어 발전시켜줘. | 선택 텍스트/본문을 직접 보낼 수 없으므로 현재는 원문을 문서로 저장한 뒤 `context.document_id`를 붙여 보낸다. | 조건부 적절 | `find_documents -> explore_ideas/answer_question`; 선택 본문이 없으면 검색 evidence에 의존한다. |

@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from foldmind_ai_core.adapters.outbound.neo4j.mappers import (
-    document_signal_record_from_projection,
-    document_relationship_node_from_projection,
-    document_signal_node_from_projection,
-    folder_signal_record_from_projection,
-    folder_signal_relationship,
-    folder_node_from_projection,
+    document_relationship_node_from_source,
+    document_signal_node_from_source,
+    document_signal_record_from_source,
+    folder_node_from_source,
     folder_reference_node,
+    folder_signal_record_from_source,
+    folder_signal_relationship,
     signal_relationship,
 )
 from foldmind_ai_core.adapters.outbound.neo4j.models import (
@@ -17,38 +17,38 @@ from foldmind_ai_core.adapters.outbound.neo4j.models import (
     Neo4jFolderNodeRecord,
     Neo4jFolderSignalNodeRecord,
 )
-from foldmind_ai_core.core.application.projections.graph import (
-    DocumentFolderRelationProjection,
-    DocumentRelationshipProjection,
-    DocumentSignalProjection,
-    DocumentSignalNodeProjection,
-    FolderRelationshipProjection,
-    FolderSignalNodeProjection,
-    FolderSignalProjection,
+from foldmind_ai_core.core.domain.models.document_folder_relations import (
+    SourceDocumentFolderRelationSnapshot,
 )
+from foldmind_ai_core.core.domain.models.document_index_state import DocumentIndexState
+from foldmind_ai_core.core.domain.models.document_signals import DocumentSignal
+from foldmind_ai_core.core.domain.models.document_sources import DocumentSourceState
+from foldmind_ai_core.core.domain.models.folder_signals import FolderSignal
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
 
 
 def replace_document_projection(
     session: Any,
     *,
-    relationships: DocumentRelationshipProjection,
-    signals: DocumentSignalProjection,
+    document: DocumentSourceState,
+    document_index: DocumentIndexState,
+    signals: tuple[DocumentSignal, ...],
 ) -> None:
-    _replace_document_relationships(session, relationships)
-    _replace_document_signals(session, signals)
+    _replace_document_relationships(session, document)
+    _replace_document_signals(session, document, document_index, signals)
 
 
 def _replace_document_relationships(
     session: Any,
-    projection: DocumentRelationshipProjection,
+    document: DocumentSourceState,
 ) -> None:
-    _merge_document_relationship_identity(session, projection)
+    _merge_document_relationship_identity(session, document)
 
 
 def replace_document_folder_relations(
     session: Any,
     *,
-    projection: DocumentFolderRelationProjection,
+    projection: SourceDocumentFolderRelationSnapshot,
 ) -> None:
     _merge_document_reference(session, projection)
     _replace_document_folder_relation_edges(session, projection)
@@ -56,7 +56,7 @@ def replace_document_folder_relations(
 
 def _replace_document_folder_relation_edges(
     session: Any,
-    projection: DocumentFolderRelationProjection,
+    projection: SourceDocumentFolderRelationSnapshot,
 ) -> None:
     _delete_document_relationship_edges(session, projection)
     for folder_id in projection.folder_ids:
@@ -65,67 +65,93 @@ def _replace_document_folder_relation_edges(
 
 def _replace_document_signals(
     session: Any,
-    projection: DocumentSignalProjection,
+    document: DocumentSourceState,
+    document_index: DocumentIndexState,
+    signals: tuple[DocumentSignal, ...],
 ) -> None:
-    _merge_document_signal_identity(session, projection)
-    _delete_document_signal_edges(session, projection)
-    _delete_document_signal_nodes(session, projection)
-    for signal in projection.signals:
+    _merge_document_signal_identity(session, document, document_index)
+    _delete_document_signal_edges(session, document)
+    _delete_document_signal_nodes(session, document)
+    for signal in signals:
         _merge_document_signal_node(
             session,
-            document_signal_record_from_projection(signal),
+            document_signal_record_from_source(
+                signal,
+                content_digest=document.content_digest,
+            ),
         )
-        _link_document_to_signal(session, projection, signal)
+        _link_document_to_signal(session, document, document_index, signal)
 
 
 def replace_folder_projection(
     session: Any,
     *,
-    relationships: FolderRelationshipProjection,
+    folder: SourceFolder,
 ) -> None:
-    _merge_folder(session, folder_node_from_projection(relationships))
-    _delete_folder_parent_edges(session, relationships)
-    parent_folder_id = relationships.parent_folder_id
+    _merge_folder(session, folder_node_from_source(folder))
+    _delete_folder_parent_edges(session, folder)
+    parent_folder_id = folder.parent_folder_id
     if parent_folder_id is None:
         return
-    _link_folder_to_parent(session, relationships, parent_folder_id)
+    _link_folder_to_parent(session, folder, parent_folder_id)
 
 
 def replace_folder_signal_projection(
     session: Any,
     *,
-    signals: FolderSignalProjection,
+    folder: SourceFolder,
+    folder_signal_input_digest: str,
+    signal_generation_version: str,
+    signals: tuple[FolderSignal, ...],
 ) -> None:
-    _delete_folder_signals(session, signals)
-    for signal in signals.signals:
+    delete_folder_signal_projection(
+        session,
+        tenant=folder.tenant,
+        folder_id=folder.folder_id,
+    )
+    for signal in signals:
         _merge_folder_signal_node(
             session,
-            folder_signal_record_from_projection(signal),
+            folder_signal_record_from_source(signal),
         )
-        _link_folder_to_signal(session, signals, signal)
+        _link_folder_to_signal(
+            session,
+            folder,
+            folder_signal_input_digest,
+            signal_generation_version,
+            signal,
+        )
         _link_folder_signal_to_related_document(session, signal)
 
 
 def delete_document_projection(
     session: Any,
     *,
+    tenant: str,
     document_id: str,
 ) -> None:
     session.run(
         """
-        MATCH (d:Document {document_id: $document_id})
+        MATCH (d:Document {tenant: $tenant, document_id: $document_id})
         DETACH DELETE d
         """,
+        tenant=tenant,
         document_id=document_id,
     )
 
 
-def delete_folder_signal_projection(session: Any, *, folder_id: str) -> None:
+def delete_folder_signal_projection(
+    session: Any,
+    *,
+    tenant: str,
+    folder_id: str,
+) -> None:
     session.run(
         """
-        MATCH (s:FolderSignal {folder_id: $folder_id})
+        MATCH (s:FolderSignal {tenant: $tenant, folder_id: $folder_id})
         DETACH DELETE s
         """,
+        tenant=tenant,
         folder_id=folder_id,
     )
 
@@ -133,24 +159,26 @@ def delete_folder_signal_projection(session: Any, *, folder_id: str) -> None:
 def delete_stale_folder_signal_projection(
     session: Any,
     *,
+    tenant: str,
     folder_id: str,
     current_folder_signal_input_digest: str,
 ) -> None:
     session.run(
         """
-        MATCH (s:FolderSignal {folder_id: $folder_id})
+        MATCH (s:FolderSignal {tenant: $tenant, folder_id: $folder_id})
         WHERE coalesce(s.folder_signal_input_digest, '') <> $current_folder_signal_input_digest
         DETACH DELETE s
         """,
+        tenant=tenant,
         folder_id=folder_id,
         current_folder_signal_input_digest=current_folder_signal_input_digest,
     )
 
 
-def delete_folder_projection(session: Any, *, folder_id: str) -> None:
+def delete_folder_projection(session: Any, *, tenant: str, folder_id: str) -> None:
     session.run(
         """
-        MATCH (f:Folder {folder_id: $folder_id})
+        MATCH (f:Folder {tenant: $tenant, folder_id: $folder_id})
         SET f.projection_state = 'deleted'
         REMOVE f.deleted
         WITH f
@@ -166,77 +194,75 @@ def delete_folder_projection(session: Any, *, folder_id: str) -> None:
         OPTIONAL MATCH (f)-[:HAS_SIGNAL]->(s:FolderSignal)
         DETACH DELETE s
         """,
+        tenant=tenant,
         folder_id=folder_id,
     )
 
 
 def _delete_document_relationship_edges(
     session: Any,
-    projection: DocumentRelationshipProjection | DocumentFolderRelationProjection,
+    projection: SourceDocumentFolderRelationSnapshot,
 ) -> None:
     session.run(
         """
-        MATCH (d:Document {document_id: $document_id})-[r:IN_FOLDER]->()
+        MATCH (d:Document {tenant: $tenant, document_id: $document_id})-[r:IN_FOLDER]->()
         DELETE r
         """,
+        tenant=projection.tenant,
         document_id=projection.document_id,
     )
 
 
 def _delete_document_signal_edges(
     session: Any,
-    projection: DocumentSignalProjection,
+    document: DocumentSourceState,
 ) -> None:
     session.run(
         """
-        MATCH (d:Document {document_id: $document_id})-[r:HAS_SIGNAL]->()
+        MATCH (d:Document {tenant: $tenant, document_id: $document_id})-[r:HAS_SIGNAL]->()
         DELETE r
         """,
-        document_id=projection.document_id,
+        tenant=document.tenant,
+        document_id=document.document_id,
     )
 
 
 def _delete_document_signal_nodes(
     session: Any,
-    projection: DocumentSignalProjection,
+    document: DocumentSourceState,
 ) -> None:
     session.run(
         """
-        MATCH (s:DocumentSignal {document_id: $document_id})
+        MATCH (s:DocumentSignal {tenant: $tenant, document_id: $document_id})
         DETACH DELETE s
         """,
-        document_id=projection.document_id,
+        tenant=document.tenant,
+        document_id=document.document_id,
     )
-
-
-def _delete_folder_signals(
-    session: Any,
-    projection: FolderSignalProjection,
-) -> None:
-    delete_folder_signal_projection(session, folder_id=projection.folder_id)
 
 
 def _delete_folder_parent_edges(
     session: Any,
-    projection: FolderRelationshipProjection,
+    folder: SourceFolder,
 ) -> None:
     session.run(
         """
-        MATCH (f:Folder {folder_id: $folder_id})-[r:CHILD_OF]->()
+        MATCH (f:Folder {tenant: $tenant, folder_id: $folder_id})-[r:CHILD_OF]->()
         DELETE r
         """,
-        folder_id=projection.folder_id,
+        tenant=folder.tenant,
+        folder_id=folder.folder_id,
     )
 
 
 def _merge_document_relationship_identity(
     session: Any,
-    projection: DocumentRelationshipProjection,
+    document: DocumentSourceState,
 ) -> None:
-    document = document_relationship_node_from_projection(projection)
+    document = document_relationship_node_from_source(document)
     session.run(
         """
-        MERGE (d:Document {document_id: $document_id})
+        MERGE (d:Document {tenant: $tenant, document_id: $document_id})
         SET d.tenant = $tenant,
             d.document_type = $document_type,
             d.source_version = $source_version,
@@ -256,11 +282,11 @@ def _merge_document_relationship_identity(
 
 def _merge_document_reference(
     session: Any,
-    projection: DocumentFolderRelationProjection,
+    projection: SourceDocumentFolderRelationSnapshot,
 ) -> None:
     session.run(
         """
-        MERGE (d:Document {document_id: $document_id})
+        MERGE (d:Document {tenant: $tenant, document_id: $document_id})
         SET d.tenant = $tenant
         """,
         tenant=projection.tenant,
@@ -270,12 +296,13 @@ def _merge_document_reference(
 
 def _merge_document_signal_identity(
     session: Any,
-    projection: DocumentSignalProjection,
+    document: DocumentSourceState,
+    document_index: DocumentIndexState,
 ) -> None:
-    document = document_signal_node_from_projection(projection)
+    document = document_signal_node_from_source(document, document_index)
     session.run(
         """
-        MERGE (d:Document {document_id: $document_id})
+        MERGE (d:Document {tenant: $tenant, document_id: $document_id})
         SET d.tenant = $tenant,
             d.document_type = $document_type,
             d.label = $label,
@@ -305,7 +332,7 @@ def _merge_document_signal_identity(
 
 def _link_document_to_folder(
     session: Any,
-    projection: DocumentRelationshipProjection | DocumentFolderRelationProjection,
+    projection: SourceDocumentFolderRelationSnapshot,
     folder_id: str,
 ) -> None:
     _merge_folder_reference(
@@ -314,8 +341,8 @@ def _link_document_to_folder(
     )
     session.run(
         """
-        MATCH (d:Document {document_id: $document_id})
-        MATCH (f:Folder {folder_id: $folder_id})
+        MATCH (d:Document {tenant: $tenant, document_id: $document_id})
+        MATCH (f:Folder {tenant: $tenant, folder_id: $folder_id})
         WHERE f.projection_state <> 'deleted'
         MERGE (d)-[r:IN_FOLDER]->(f)
         SET r.tenant = $tenant,
@@ -336,7 +363,7 @@ def _merge_document_signal_node(
 ) -> None:
     session.run(
         """
-        MERGE (s:DocumentSignal {signal_id: $signal_id})
+        MERGE (s:DocumentSignal {tenant: $tenant, signal_id: $signal_id})
         SET s.tenant = $tenant,
             s.signal_type = $signal_type,
             s.signal_key = $signal_key,
@@ -376,14 +403,19 @@ def _merge_document_signal_node(
 
 def _link_document_to_signal(
     session: Any,
-    projection: DocumentSignalProjection,
-    signal: DocumentSignalNodeProjection,
+    document: DocumentSourceState,
+    document_index: DocumentIndexState,
+    signal: DocumentSignal,
 ) -> None:
-    relationship = signal_relationship(projection=projection, signal=signal)
+    relationship = signal_relationship(
+        document=document,
+        document_index=document_index,
+        signal=signal,
+    )
     session.run(
         """
-        MATCH (d:Document {document_id: $document_id})
-        MATCH (s:DocumentSignal {signal_id: $signal_id})
+        MATCH (d:Document {tenant: $tenant, document_id: $document_id})
+        MATCH (s:DocumentSignal {tenant: $tenant, signal_id: $signal_id})
         MERGE (d)-[r:HAS_SIGNAL]->(s)
         SET r.tenant = $tenant,
             r.signal_id = $signal_id,
@@ -395,13 +427,13 @@ def _link_document_to_signal(
             r.metadata_json = $metadata_json
         """,
         tenant=relationship.tenant,
-        document_id=projection.document_id,
+        document_id=document.document_id,
         signal_id=signal.signal_id,
         confidence=relationship.confidence,
-        source_version=projection.source_version,
-        content_digest=projection.content_digest,
-        document_signal_input_digest=projection.document_signal_input_digest,
-        signal_generation_version=projection.signal_generation_version,
+        source_version=document.source_version,
+        content_digest=document.content_digest,
+        document_signal_input_digest=document_index.document_signal_input_digest,
+        signal_generation_version=document_index.signal_generation_version,
         metadata_json=relationship.metadata_json,
     )
 
@@ -412,7 +444,7 @@ def _merge_folder_signal_node(
 ) -> None:
     session.run(
         """
-        MERGE (s:FolderSignal {signal_id: $signal_id})
+        MERGE (s:FolderSignal {tenant: $tenant, signal_id: $signal_id})
         SET s.tenant = $tenant,
             s.folder_id = $folder_id,
             s.source_version = $source_version,
@@ -452,14 +484,21 @@ def _merge_folder_signal_node(
 
 def _link_folder_to_signal(
     session: Any,
-    projection: FolderSignalProjection,
-    signal: FolderSignalNodeProjection,
+    folder: SourceFolder,
+    folder_signal_input_digest: str,
+    signal_generation_version: str,
+    signal: FolderSignal,
 ) -> None:
-    relationship = folder_signal_relationship(projection=projection, signal=signal)
+    relationship = folder_signal_relationship(
+        folder=folder,
+        folder_signal_input_digest=folder_signal_input_digest,
+        signal_generation_version=signal_generation_version,
+        signal=signal,
+    )
     session.run(
         """
-        MATCH (f:Folder {folder_id: $folder_id})
-        MATCH (s:FolderSignal {signal_id: $signal_id})
+        MATCH (f:Folder {tenant: $tenant, folder_id: $folder_id})
+        MATCH (s:FolderSignal {tenant: $tenant, signal_id: $signal_id})
         MERGE (f)-[r:HAS_SIGNAL]->(s)
         SET r.tenant = $tenant,
             r.signal_id = $signal_id,
@@ -470,26 +509,26 @@ def _link_folder_to_signal(
             r.metadata_json = $metadata_json
         """,
         tenant=relationship.tenant,
-        folder_id=projection.folder_id,
+        folder_id=folder.folder_id,
         signal_id=signal.signal_id,
         confidence=relationship.confidence,
-        source_version=projection.source_version,
-        folder_signal_input_digest=projection.folder_signal_input_digest,
-        signal_generation_version=projection.signal_generation_version,
+        source_version=folder.source_version,
+        folder_signal_input_digest=folder_signal_input_digest,
+        signal_generation_version=signal_generation_version,
         metadata_json=relationship.metadata_json,
     )
 
 
 def _link_folder_signal_to_related_document(
     session: Any,
-    signal: FolderSignalNodeProjection,
+    signal: FolderSignal,
 ) -> None:
     if signal.related_document_id is None:
         return
     session.run(
         """
-        MATCH (s:FolderSignal {signal_id: $signal_id})
-        MATCH (d:Document {document_id: $document_id})
+        MATCH (s:FolderSignal {tenant: $tenant, signal_id: $signal_id})
+        MATCH (d:Document {tenant: $tenant, document_id: $document_id})
         MERGE (s)-[r:ABOUT_DOCUMENT]->(d)
         SET r.tenant = $tenant,
             r.confidence = $confidence,
@@ -504,25 +543,25 @@ def _link_folder_signal_to_related_document(
 
 def _link_folder_to_parent(
     session: Any,
-    projection: FolderRelationshipProjection,
+    folder: SourceFolder,
     parent_folder_id: str,
 ) -> None:
     _merge_folder_reference(
         session,
-        folder_reference_node(tenant=projection.tenant, folder_id=parent_folder_id),
+        folder_reference_node(tenant=folder.tenant, folder_id=parent_folder_id),
     )
     session.run(
         """
-        MATCH (child:Folder {folder_id: $folder_id})
-        MATCH (parent:Folder {folder_id: $parent_folder_id})
+        MATCH (child:Folder {tenant: $tenant, folder_id: $folder_id})
+        MATCH (parent:Folder {tenant: $tenant, folder_id: $parent_folder_id})
         WHERE parent.projection_state <> 'deleted'
         MERGE (child)-[r:CHILD_OF]->(parent)
         SET r.tenant = $tenant,
             r.confidence = 1.0,
             r.metadata_json = '{}'
         """,
-        tenant=projection.tenant,
-        folder_id=projection.folder_id,
+        tenant=folder.tenant,
+        folder_id=folder.folder_id,
         parent_folder_id=parent_folder_id,
     )
 
@@ -530,7 +569,7 @@ def _link_folder_to_parent(
 def _merge_folder(session: Any, folder: Neo4jFolderNodeRecord) -> None:
     session.run(
         """
-        MERGE (f:Folder {folder_id: $folder_id})
+        MERGE (f:Folder {tenant: $tenant, folder_id: $folder_id})
         SET f.tenant = $tenant,
             f.label = $label,
             f.projection_state = $projection_state,
@@ -564,7 +603,7 @@ def _merge_folder(session: Any, folder: Neo4jFolderNodeRecord) -> None:
 def _merge_folder_reference(session: Any, folder: Neo4jFolderNodeRecord) -> None:
     session.run(
         """
-        MERGE (f:Folder {folder_id: $folder_id})
+        MERGE (f:Folder {tenant: $tenant, folder_id: $folder_id})
         ON CREATE SET f.tenant = $tenant,
                       f.projection_state = 'reference'
         SET f.tenant = coalesce(f.tenant, $tenant),

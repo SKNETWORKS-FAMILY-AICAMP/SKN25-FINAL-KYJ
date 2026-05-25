@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from langgraph.graph import END
@@ -14,11 +14,13 @@ from foldmind_ai_core.adapters.outbound.workflow_runtime.checkpoint_codec import
     workflow_state_to_checkpoint,
 )
 from foldmind_ai_core.adapters.outbound.workflow_runtime.graph_state import GraphState
-from foldmind_ai_core.core.application.workflows.engine import WorkflowEngine
-from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
-from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.workflow.actions import HostActionResult
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskStatus
+from foldmind_ai_core.core.application.ports.outbound.runtime.workflow_runtime import (
+    WorkflowActionType,
+    WorkflowExecutionEngine,
+    WorkflowState,
+)
+from foldmind_ai_core.core.domain.models.host_actions import HostActionResult
+from foldmind_ai_core.core.domain.models.tasks import TaskStatus
 
 _TERMINAL_TASK_STATUSES = {
     TaskStatus.COMPLETED,
@@ -29,25 +31,28 @@ _TERMINAL_TASK_STATUSES = {
 
 @dataclass(slots=True)
 class LangGraphWorkflowNodes:
-    engine: WorkflowEngine
+    engine: WorkflowExecutionEngine
 
-    def plan(self, state: GraphState) -> GraphState:
-        return self.__map_state(state, self.engine.prepare)
+    async def plan(self, state: GraphState) -> GraphState:
+        return await self.__map_state_async(state, self.engine.prepare)
 
     def route_step_node(self, state: GraphState) -> GraphState:
         return state
 
-    def step(self, action_type: WorkflowActionType) -> Callable[[GraphState], GraphState]:
-        def node(state: GraphState) -> GraphState:
-            return self.__run_step(state, expected_action_type=action_type)
+    def step(
+        self,
+        action_type: WorkflowActionType,
+    ) -> Callable[[GraphState], Awaitable[GraphState]]:
+        async def node(state: GraphState) -> GraphState:
+            return await self.__run_step(state, expected_action_type=action_type)
 
         return node
 
-    def replan(self, state: GraphState) -> GraphState:
-        return self.__map_state(state, self.engine.replan)
+    async def replan(self, state: GraphState) -> GraphState:
+        return await self.__map_state_async(state, self.engine.replan)
 
-    def retry_step(self, state: GraphState) -> GraphState:
-        return self.__run_step(state, expected_action_type=None)
+    async def retry_step(self, state: GraphState) -> GraphState:
+        return await self.__run_step(state, expected_action_type=None)
 
     def retry_host_action(self, state: GraphState) -> GraphState:
         return self.__map_state(state, self.engine.retry_host_action)
@@ -88,11 +93,7 @@ class LangGraphWorkflowNodes:
         if workflow.task.status in _TERMINAL_TASK_STATUSES:
             return END
         if workflow.last_error is not None:
-            return (
-                routes.RETRY_STEP
-                if self.engine.can_retry_step(workflow)
-                else routes.FAIL
-            )
+            return routes.RETRY_STEP if self.engine.can_retry_step(workflow) else routes.FAIL
         if workflow.pending_actions:
             return routes.WAIT_FOR_HOST_ACTION
         return routes.ROUTE_STEP if self.engine.has_next_step(workflow) else END
@@ -111,7 +112,7 @@ class LangGraphWorkflowNodes:
             return routes.WAIT_FOR_HOST_ACTION
         return routes.ROUTE_STEP if self.engine.has_next_step(workflow) else END
 
-    def __run_step(
+    async def __run_step(
         self,
         state: GraphState,
         *,
@@ -121,7 +122,7 @@ class LangGraphWorkflowNodes:
         workflow.failed_step_key = None
         workflow.last_error = None
         try:
-            workflow = self.engine.run_step(
+            workflow = await self.engine.run_step(
                 workflow,
                 expected_action_type=expected_action_type,
             )
@@ -139,3 +140,12 @@ class LangGraphWorkflowNodes:
         update: Callable[[WorkflowState], WorkflowState],
     ) -> GraphState:
         return workflow_state_to_checkpoint(update(workflow_state_from_checkpoint(state)))
+
+    async def __map_state_async(
+        self,
+        state: GraphState,
+        update: Callable[[WorkflowState], Awaitable[WorkflowState]],
+    ) -> GraphState:
+        return workflow_state_to_checkpoint(
+            await update(workflow_state_from_checkpoint(state))
+        )

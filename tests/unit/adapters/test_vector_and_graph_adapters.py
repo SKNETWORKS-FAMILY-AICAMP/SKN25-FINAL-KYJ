@@ -55,10 +55,6 @@ class FakeQdrantModels:
         def __init__(self, **values: object) -> None:
             self.values = values
 
-    class DatetimeRange:
-        def __init__(self, **values: object) -> None:
-            self.values = values
-
     class PayloadSchemaType:
         KEYWORD = "keyword"
         DATETIME = "datetime"
@@ -78,6 +74,7 @@ def install_provider_sdk_fakes() -> None:
 
 install_provider_sdk_fakes()
 
+from foldmind_ai_core.adapters.outbound.neo4j.mappers import document_from_node  # noqa: E402
 from foldmind_ai_core.adapters.outbound.neo4j.schema import ensure_neo4j_schema  # noqa: E402
 from foldmind_ai_core.adapters.outbound.neo4j.stores.graph_store import (  # noqa: E402
     Neo4jGraphStore,
@@ -99,26 +96,29 @@ from foldmind_ai_core.adapters.outbound.qdrant.stores.folder_vector_store import
 from foldmind_ai_core.adapters.outbound.qdrant.stores.signal_vector_store import (  # noqa: E402
     QdrantSignalVectorStore,
 )
-from foldmind_ai_core.core.application.models.projection_inputs import (  # noqa: E402
-    ProjectionSignalEvidence,
+from foldmind_ai_core.core.domain.models.document_signals import (
+    DocumentSignal,
+    DocumentSignalEvidence,
+    DocumentSignalType,
 )
-from foldmind_ai_core.core.application.projections.graph import (  # noqa: E402
-    DocumentFolderRelationProjection,
-    DocumentRelationshipProjection,
-    DocumentSignalProjection,
-    DocumentSignalNodeProjection,
-    FolderRelationshipProjection,
-    FolderSignalProjection,
-    FolderSignalNodeProjection,
+from foldmind_ai_core.core.domain.models.document_folder_relations import (
+    SourceDocumentFolderRelationSnapshot,
 )
-from foldmind_ai_core.core.application.projections.vector import (  # noqa: E402
+from foldmind_ai_core.core.domain.models.document_index_state import DocumentIndexState
+from foldmind_ai_core.core.domain.models.document_sources import DocumentSourceState
+from foldmind_ai_core.core.domain.models.folder_signals import (
+    FolderSignal,
+    FolderSignalType,
+)
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
+from foldmind_ai_core.core.application.models.vector_projection import (
     DocumentChunkVectorProjection,
     DocumentSignalVectorProjection,
     DocumentVectorProjection,
     FolderSignalVectorProjection,
     FolderVectorProjection,
 )
-from foldmind_ai_core.core.application.queries.retrieval import SearchScope  # noqa: E402
+from foldmind_ai_core.core.application.models.search import SearchScope
 from foldmind_ai_core.shared.internal_ids import stable_internal_id  # noqa: E402
 from foldmind_ai_core.shared.validation import InvalidInputError  # noqa: E402
 
@@ -181,21 +181,23 @@ class FakeScoredPoint:
 
 
 class FakeNeo4jClient:
-    def __init__(self) -> None:
+    def __init__(self, run_records: list[object] | None = None) -> None:
+        self.run_records = run_records or []
         self.sessions: list[FakeNeo4jSession] = []
 
-    def session(self) -> "FakeNeo4jSession":
-        session = FakeNeo4jSession()
+    def session(self) -> FakeNeo4jSession:
+        session = FakeNeo4jSession(run_records=self.run_records)
         self.sessions.append(session)
         return session
 
 
 class FakeNeo4jSession:
-    def __init__(self) -> None:
+    def __init__(self, run_records: list[object] | None = None) -> None:
+        self.run_records = run_records or []
         self.transactions: list[FakeNeo4jTransaction] = []
         self.statements: list[str] = []
 
-    def __enter__(self) -> "FakeNeo4jSession":
+    def __enter__(self) -> FakeNeo4jSession:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -211,7 +213,7 @@ class FakeNeo4jSession:
 
     def run(self, statement: str, **parameters: object) -> list[object]:
         self.statements.append(statement)
-        return []
+        return self.run_records
 
 
 class FakeNeo4jTransaction:
@@ -234,7 +236,12 @@ class VectorAdapterTests(unittest.TestCase):
             config=QdrantCollectionConfig(
                 collection_name="documents",
                 vector_size=3,
-                payload_indexes=("tenant", "updated_at", "source_input_digest", "vector_input_digest"),
+                payload_indexes=(
+                    "tenant",
+                    "updated_at",
+                    "source_input_digest",
+                    "vector_input_digest",
+                ),
             ),
             settings=QdrantSettings(url="http://qdrant:6333"),
             client=client,
@@ -313,6 +320,7 @@ class VectorAdapterTests(unittest.TestCase):
                 stable_internal_id(
                     "documents",
                     "document",
+                    "tenant-1",
                     "doc-1",
                     "vector-input-v1",
                 ),
@@ -320,6 +328,7 @@ class VectorAdapterTests(unittest.TestCase):
                     "signals",
                     "signal-vector",
                     "document",
+                    "tenant-1",
                     "doc-1",
                     "signal-1",
                     "vector-input-v1",
@@ -328,6 +337,7 @@ class VectorAdapterTests(unittest.TestCase):
                     "signals",
                     "signal-vector",
                     "folder",
+                    "tenant-1",
                     "folder-1",
                     "folder-signal-1",
                     "vector-input-v1",
@@ -335,6 +345,7 @@ class VectorAdapterTests(unittest.TestCase):
                 stable_internal_id(
                     "folders",
                     "folder",
+                    "tenant-1",
                     "folder-1",
                     "vector-input-v1",
                 ),
@@ -442,6 +453,9 @@ class VectorAdapterTests(unittest.TestCase):
                     "signal_key": "issue-key",
                     "text": "Repeated concern",
                     "source_version": "v1",
+                    "source_input_digest": "signal-input-v1",
+                    "vector_input_digest": "signal-vector-input-v1",
+                    "signal_generation_version": "signal-v1",
                     "evidence": [
                         {
                             "chunk_id": "chunk-1",
@@ -458,6 +472,8 @@ class VectorAdapterTests(unittest.TestCase):
                     "embedding_model": "embedding",
                     "embedding_version": "v1",
                     "index_schema_version": "schema-v1",
+                    "extractor_name": "test-extractor",
+                    "extractor_version": "test-extractor-v1",
                     "metadata": {},
                 }
             )
@@ -482,6 +498,53 @@ class VectorAdapterTests(unittest.TestCase):
         }
         self.assertEqual(filters["document_id"], "doc-1")
         self.assertEqual(filters["owner_kind"], "document")
+
+    def test_qdrant_signal_search_skips_payload_without_required_provenance(
+        self,
+    ) -> None:
+        client = FakeQdrantClient()
+        store = QdrantSignalVectorStore(
+            client=_qdrant_collection_client("signals", client),
+        )
+        stale_payload = _signal_payload(owner_kind="document")
+        del stale_payload["source_input_digest"]
+        client.points = [
+            FakeScoredPoint(payload=stale_payload),
+            FakeScoredPoint(payload=_signal_payload(owner_kind="document")),
+        ]
+
+        results = store.search_signals(
+            tenant="tenant-1",
+            query_vector=[0.1],
+            top_k=5,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].signal.signal_id, "signal-1")
+        self.assertEqual(results[0].signal.source_version, "v1")
+
+    def test_qdrant_signal_search_skips_payload_without_extractor_provenance(
+        self,
+    ) -> None:
+        client = FakeQdrantClient()
+        store = QdrantSignalVectorStore(
+            client=_qdrant_collection_client("signals", client),
+        )
+        stale_payload = _signal_payload(owner_kind="document")
+        del stale_payload["extractor_name"]
+        client.points = [
+            FakeScoredPoint(payload=stale_payload),
+            FakeScoredPoint(payload=_signal_payload(owner_kind="document")),
+        ]
+
+        results = store.search_signals(
+            tenant="tenant-1",
+            query_vector=[0.1],
+            top_k=5,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].signal.signal_id, "signal-1")
 
     def test_qdrant_signal_search_includes_folder_signals_by_default(self) -> None:
         client = FakeQdrantClient()
@@ -562,6 +625,19 @@ class VectorAdapterTests(unittest.TestCase):
 
 
 class GraphAdapterTests(unittest.TestCase):
+    def test_neo4j_document_mapper_rejects_nodes_without_required_provenance(
+        self,
+    ) -> None:
+        with self.assertRaises((KeyError, ValueError)):
+            document_from_node(
+                {
+                    "tenant": "tenant-1",
+                    "document_id": "doc-1",
+                    "created_at": "2026-05-01T10:00:00+09:00",
+                    "updated_at": "2026-05-02T11:00:00+09:00",
+                }
+            )
+
     def test_neo4j_schema_uses_signal_identity(self) -> None:
         session = FakeNeo4jSession()
 
@@ -625,51 +701,46 @@ class GraphAdapterTests(unittest.TestCase):
         repository = Neo4jGraphStore(client=client)
 
         repository.replace_document_projection(
-            relationships=DocumentRelationshipProjection(
+            document=DocumentSourceState(
                 tenant="tenant-1",
                 document_type="document",
                 document_id="doc-1",
                 source_version="v1",
+                title="Title",
                 content_digest="content-digest-1",
+                content_size_bytes=128,
                 created_at="2026-05-01T10:00:00+09:00",
                 updated_at="2026-05-02T11:00:00+09:00",
+                metadata={"scope": "research"},
             ),
-            signals=DocumentSignalProjection(
-                tenant="tenant-1",
-                document_type="document",
+            document_index=DocumentIndexState(
                 document_id="doc-1",
-                source_version="v1",
-                content_digest="content-digest-1",
                 document_index_input_digest="index-input-v1",
                 document_signal_input_digest="document-signal-input-v1",
-                created_at="2026-05-01T10:00:00+09:00",
-                updated_at="2026-05-02T11:00:00+09:00",
-                title="Title",
-                signals=(
-                    DocumentSignalNodeProjection(
-                        signal_id="signal-1",
-                        tenant="tenant-1",
-                        signal_type="concept",
-                        signal_key="startup",
-                        text="Startup",
-                        document_id="doc-1",
-                        source_version="v1",
-                        content_digest="content-digest-1",
-                        document_signal_input_digest="document-signal-input-v1",
-                        signal_generation_version="1",
-                        evidence=(
-                            ProjectionSignalEvidence(
-                                chunk_id="chunk-1",
-                                quote="startup evidence",
-                                start_offset=0,
-                                end_offset=16,
-                            ),
+            ),
+            signals=(
+                DocumentSignal(
+                    signal_id="signal-1",
+                    tenant="tenant-1",
+                    document_type="document",
+                    document_id="doc-1",
+                    source_version="v1",
+                    document_signal_input_digest="document-signal-input-v1",
+                    signal_type=DocumentSignalType.CONCEPT,
+                    signal_key="startup",
+                    text="Startup",
+                    evidence=(
+                        DocumentSignalEvidence(
+                            chunk_id="chunk-1",
+                            quote="startup evidence",
+                            start_offset=0,
+                            end_offset=16,
                         ),
-                        confidence=0.9,
-                        extractor_name="test-extractor",
-                        extractor_version="test-extractor-v1",
-                        generation_model="test-model",
                     ),
+                    confidence=0.9,
+                    extractor_name="test-extractor",
+                    extractor_version="test-extractor-v1",
+                    generation_model="test-model",
                 ),
             ),
         )
@@ -679,15 +750,15 @@ class GraphAdapterTests(unittest.TestCase):
         self.assertNotIn("IN_FOLDER", statements)
         self.assertNotIn("HAS_TAG", statements)
         self.assertIn("HAS_SIGNAL", statements)
-        self.assertIn("MERGE (d:Document {document_id: $document_id})", statements)
-        self.assertIn("MATCH (d:Document {document_id: $document_id})", statements)
-        self.assertNotIn("MATCH (f:Folder {folder_id: $folder_id})", statements)
-        self.assertNotIn("MERGE (d:Document {\n            tenant: $tenant,", statements)
-        self.assertNotIn("MATCH (d:Document {\n            tenant: $tenant,", statements)
-        self.assertNotIn(
-            "MATCH (f:Folder {tenant: $tenant, folder_id: $folder_id})",
+        self.assertIn(
+            "MERGE (d:Document {tenant: $tenant, document_id: $document_id})",
             statements,
         )
+        self.assertIn(
+            "MATCH (d:Document {tenant: $tenant, document_id: $document_id})",
+            statements,
+        )
+        self.assertNotIn("MATCH (f:Folder {folder_id: $folder_id})", statements)
         self.assertNotIn("document_type: $document_type", statements)
         self.assertIn("d.document_type = $document_type", statements)
         self.assertIn(
@@ -696,10 +767,13 @@ class GraphAdapterTests(unittest.TestCase):
         )
         self.assertIn("d.signal_generation_version = $signal_generation_version", statements)
         self.assertIn(
-            "MERGE (s:DocumentSignal {signal_id: $signal_id})",
+            "MERGE (s:DocumentSignal {tenant: $tenant, signal_id: $signal_id})",
             statements,
         )
-        self.assertIn("MATCH (s:DocumentSignal {document_id: $document_id})", statements)
+        self.assertIn(
+            "MATCH (s:DocumentSignal {tenant: $tenant, document_id: $document_id})",
+            statements,
+        )
         self.assertIn("s.content_digest = $content_digest", statements)
         self.assertIn("s.evidence_json = $evidence_json", statements)
         self.assertIn("s.extractor_name = $extractor_name", statements)
@@ -713,7 +787,8 @@ class GraphAdapterTests(unittest.TestCase):
         signal_params = next(
             parameters
             for statement, parameters in tx.calls
-            if "MERGE (s:DocumentSignal {signal_id: $signal_id})" in statement
+            if "MERGE (s:DocumentSignal {tenant: $tenant, signal_id: $signal_id})"
+            in statement
         )
         self.assertIn('"chunk_id": "chunk-1"', signal_params["evidence_json"])
         self.assertIn('"quote": "startup evidence"', signal_params["evidence_json"])
@@ -727,14 +802,6 @@ class GraphAdapterTests(unittest.TestCase):
             "document-signal-input-v1",
         )
         self.assertEqual(relation_params["signal_generation_version"], "1")
-        self.assertNotIn(
-            "MERGE (s:DocumentSignal {tenant: $tenant, signal_id: $signal_id})",
-            statements,
-        )
-        self.assertNotIn(
-            "MATCH (s:DocumentSignal {tenant: $tenant, signal_id: $signal_id})",
-            statements,
-        )
         self.assertNotIn(":Concept", statements)
         self.assertNotIn("ABOUT", statements)
 
@@ -743,7 +810,7 @@ class GraphAdapterTests(unittest.TestCase):
         repository = Neo4jGraphStore(client=client)
 
         repository.replace_document_folder_relations(
-            projection=DocumentFolderRelationProjection(
+            projection=SourceDocumentFolderRelationSnapshot(
                 tenant="tenant-1",
                 document_id="doc-1",
                 source_version="v2",
@@ -753,23 +820,29 @@ class GraphAdapterTests(unittest.TestCase):
 
         tx = client.sessions[0].transactions[0]
         statements = "\n".join(tx.statements)
-        self.assertIn("MERGE (d:Document {document_id: $document_id})", statements)
         self.assertIn(
-            "MATCH (d:Document {document_id: $document_id})-[r:IN_FOLDER]->()",
+            "MERGE (d:Document {tenant: $tenant, document_id: $document_id})",
             statements,
         )
-        self.assertIn("MATCH (f:Folder {folder_id: $folder_id})", statements)
+        self.assertIn(
+            "MATCH (d:Document {tenant: $tenant, document_id: $document_id})-[r:IN_FOLDER]->()",
+            statements,
+        )
+        self.assertIn(
+            "MATCH (f:Folder {tenant: $tenant, folder_id: $folder_id})",
+            statements,
+        )
         self.assertIn("r.source_version = $source_version", statements)
 
     def test_neo4j_tombstones_folder_and_removes_folder_edges(self) -> None:
         client = FakeNeo4jClient()
         repository = Neo4jGraphStore(client=client)
 
-        repository.delete_folder(folder_id="folder-1")
+        repository.delete_folder(tenant="tenant-1", folder_id="folder-1")
 
         statements = "\n".join(client.sessions[0].transactions[0].statements)
         self.assertIn(
-            "MATCH (f:Folder {folder_id: $folder_id})",
+            "MATCH (f:Folder {tenant: $tenant, folder_id: $folder_id})",
             statements,
         )
         self.assertNotIn("MERGE (f:Folder {folder_id: $folder_id})", statements)
@@ -788,69 +861,70 @@ class GraphAdapterTests(unittest.TestCase):
         client = FakeNeo4jClient()
         repository = Neo4jGraphStore(client=client)
 
-        repository.delete_folder_signals(folder_id="folder-1")
+        repository.delete_folder_signals(tenant="tenant-1", folder_id="folder-1")
 
         tx = client.sessions[0].transactions[0]
         statements = "\n".join(tx.statements)
-        self.assertIn("MATCH (s:FolderSignal {folder_id: $folder_id})", statements)
+        self.assertIn(
+            "MATCH (s:FolderSignal {tenant: $tenant, folder_id: $folder_id})",
+            statements,
+        )
         self.assertIn("DETACH DELETE s", statements)
+        self.assertEqual(tx.calls[0][1]["tenant"], "tenant-1")
         self.assertEqual(tx.calls[0][1]["folder_id"], "folder-1")
 
     def test_neo4j_folder_index_clears_tombstone_and_rebuilds_hierarchy(self) -> None:
         client = FakeNeo4jClient()
         repository = Neo4jGraphStore(client=client)
+        folder = SourceFolder(
+            tenant="tenant-1",
+            folder_id="folder-1",
+            source_version="folder-v1",
+            name="Folder",
+            created_at="2026-05-01T10:00:00+09:00",
+            updated_at="2026-05-02T11:00:00+09:00",
+            parent_folder_id="root",
+            description="Folder description",
+            metadata={"scope": "research"},
+        )
 
         repository.replace_folder_projection(
-            relationships=FolderRelationshipProjection(
-                tenant="tenant-1",
-                folder_id="folder-1",
-                source_version="folder-v1",
-                name="Folder",
-                created_at="2026-05-01T10:00:00+09:00",
-                updated_at="2026-05-02T11:00:00+09:00",
-                folder_index_input_digest="folder-input-v1",
-                parent_folder_id="root",
-                description="Folder description",
-                metadata={"scope": "research"},
-            ),
+            folder=folder,
         )
         repository.replace_folder_signals(
-            signals=FolderSignalProjection(
-                tenant="tenant-1",
-                folder_id="folder-1",
-                source_version="folder-v1",
-                folder_signal_input_digest="folder-signal-input-v2",
-                signals=(
-                    FolderSignalNodeProjection(
-                        signal_id="folder-signal-1",
-                        tenant="tenant-1",
-                        folder_id="folder-1",
-                        source_version="folder-v1",
-                        signal_type="outlier_document",
-                        signal_key="doc-2",
-                        text="Outlier document",
-                        related_document_id="doc-2",
-                        evidence=({"reason": "outlier"},),
-                        confidence=0.7,
-                        folder_signal_input_digest="folder-signal-input-v2",
-                    ),
+            folder=folder,
+            folder_signal_input_digest="folder-signal-input-v2",
+            signal_generation_version="1",
+            signals=(
+                FolderSignal(
+                    signal_id="folder-signal-1",
+                    tenant="tenant-1",
+                    folder_id="folder-1",
+                    source_version="folder-v1",
+                    signal_type=FolderSignalType.OUTLIER_DOCUMENT,
+                    signal_key="doc-2",
+                    text="Outlier document",
+                    extractor_name="folder-extractor",
+                    extractor_version="folder-extractor-v1",
+                    related_document_id="doc-2",
+                    evidence=({"reason": "outlier"},),
+                    confidence=0.7,
+                    folder_signal_input_digest="folder-signal-input-v2",
                 ),
             ),
         )
 
         statements = "\n".join(client.sessions[0].transactions[0].statements)
-        self.assertIn("MERGE (f:Folder {folder_id: $folder_id})", statements)
-        self.assertNotIn(
+        self.assertIn(
             "MERGE (f:Folder {tenant: $tenant, folder_id: $folder_id})",
             statements,
         )
-        self.assertIn("MATCH (child:Folder {folder_id: $folder_id})", statements)
         self.assertIn(
-            "MATCH (parent:Folder {folder_id: $parent_folder_id})",
+            "MATCH (child:Folder {tenant: $tenant, folder_id: $folder_id})",
             statements,
         )
-        self.assertNotIn(
-            "MATCH (child:Folder {tenant: $tenant, folder_id: $folder_id})",
+        self.assertIn(
+            "MATCH (parent:Folder {tenant: $tenant, folder_id: $parent_folder_id})",
             statements,
         )
         self.assertIn("f.projection_state = $projection_state", statements)
@@ -862,12 +936,15 @@ class GraphAdapterTests(unittest.TestCase):
         self.assertNotIn("MERGE (s:FolderSignal {signal_id: $signal_id})", statements)
         folder_params = client.sessions[0].transactions[0].calls[0][1]
         self.assertEqual(folder_params["projection_state"], "active")
-        self.assertEqual(folder_params["folder_index_input_digest"], "folder-input-v1")
+        self.assertTrue(folder_params["folder_index_input_digest"])
         self.assertEqual(folder_params["description"], "Folder description")
         self.assertEqual(folder_params["metadata_json"], '{"scope": "research"}')
 
         signal_statements = "\n".join(client.sessions[1].transactions[0].statements)
-        self.assertIn("MERGE (s:FolderSignal {signal_id: $signal_id})", signal_statements)
+        self.assertIn(
+            "MERGE (s:FolderSignal {tenant: $tenant, signal_id: $signal_id})",
+            signal_statements,
+        )
         self.assertIn(
             "s.folder_signal_input_digest = $folder_signal_input_digest",
             signal_statements,
@@ -880,7 +957,8 @@ class GraphAdapterTests(unittest.TestCase):
         signal_params = next(
             parameters
             for statement, parameters in client.sessions[1].transactions[0].calls
-            if "MERGE (s:FolderSignal {signal_id: $signal_id})" in statement
+            if "MERGE (s:FolderSignal {tenant: $tenant, signal_id: $signal_id})"
+            in statement
         )
         self.assertEqual(signal_params["evidence_json"], '[{"reason": "outlier"}]')
         relation_params = next(
@@ -893,6 +971,39 @@ class GraphAdapterTests(unittest.TestCase):
             "folder-signal-input-v2",
         )
         self.assertEqual(relation_params["signal_generation_version"], "1")
+
+    def test_neo4j_folders_for_documents_skips_folder_without_source_version(self) -> None:
+        client = FakeNeo4jClient(
+            run_records=[
+                {
+                    "document_id": "doc-1",
+                    "folders": [
+                        {
+                            "tenant": "tenant-1",
+                            "folder_id": "folder-missing-version",
+                            "name": "Missing version",
+                        },
+                        {
+                            "tenant": "tenant-1",
+                            "folder_id": "folder-1",
+                            "source_version": "folder-v1",
+                            "created_at": "2026-05-01T10:00:00+09:00",
+                            "updated_at": "2026-05-02T11:00:00+09:00",
+                            "name": "Folder",
+                        },
+                    ],
+                }
+            ]
+        )
+        repository = Neo4jGraphStore(client=client)
+
+        folders = repository.folders_for_documents(
+            tenant="tenant-1",
+            document_ids=("doc-1",),
+        )
+
+        self.assertEqual([folder.folder_id for folder in folders["doc-1"]], ["folder-1"])
+        self.assertEqual(folders["doc-1"][0].source_version, "folder-v1")
 
 
 def _qdrant_collection_client(
@@ -924,7 +1035,6 @@ def _chunk_projection() -> DocumentChunkVectorProjection:
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id="chunk-1",
         chunk_index=0,
-        chunking_version="chunking-test-v1",
         text="startup evidence",
         text_hash="hash-1",
         start_offset=0,
@@ -971,7 +1081,7 @@ def _signal_projection() -> DocumentSignalVectorProjection:
         signal_generation_version="signal-v1",
         confidence=0.8,
         attributes={},
-        evidence=(ProjectionSignalEvidence(chunk_id="chunk-1", quote="startup evidence"),),
+        evidence=(DocumentSignalEvidence(chunk_id="chunk-1", quote="startup evidence"),),
         embedding_input="startup summary",
         embedding_input_hash="signal-hash-1",
         embedding_model="test-embedding",
@@ -1035,6 +1145,8 @@ def _signal_payload(*, owner_kind: str) -> dict[str, object]:
             "embedding_model": "embedding",
             "embedding_version": "v1",
             "index_schema_version": "schema-v1",
+            "extractor_name": "folder-extractor",
+            "extractor_version": "folder-extractor-v1",
             "metadata": {},
         }
     return {
@@ -1061,6 +1173,8 @@ def _signal_payload(*, owner_kind: str) -> dict[str, object]:
         "embedding_model": "embedding",
         "embedding_version": "v1",
         "index_schema_version": "schema-v1",
+        "extractor_name": "test-extractor",
+        "extractor_version": "test-extractor-v1",
         "metadata": {},
     }
 

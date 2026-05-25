@@ -28,15 +28,14 @@ from foldmind_ai_core.adapters.inbound.http.dtos.actions import (
     UpdateDocumentInputDTO,
     UpdateDocumentOutputDTO,
 )
-from foldmind_ai_core.adapters.inbound.http.dtos.dto_model import APIDTO
 from foldmind_ai_core.adapters.inbound.http.dtos.documents import (
     RetrievedDocumentDTO,
     RetrievedFolderDTO,
     SourceDocumentDTO,
     SourceFolderDTO,
 )
+from foldmind_ai_core.adapters.inbound.http.dtos.dto_model import APIDTO
 from foldmind_ai_core.adapters.inbound.http.dtos.indexing import IndexDocumentRequest
-from foldmind_ai_core.adapters.inbound.http.dtos.queries import RetrievalQueryDTO
 from foldmind_ai_core.adapters.inbound.http.dtos.retrieval import (
     FolderRecommendationDTO,
     RetrievalResultDTO,
@@ -56,22 +55,20 @@ from foldmind_ai_core.adapters.inbound.http.dtos.workflow_outputs import (
     DocumentSearchResultDTO,
     DraftResultDTO,
     FolderRecommendationResultDTO,
+    GeneratedTextDTO,
     RelatedRecommendationItemDTO,
     RelatedRecommendationResultDTO,
 )
 from foldmind_ai_core.adapters.inbound.http.mappers.actions import (
-    host_action_dto_from_result,
-    host_action_result_command_from_dto,
+    host_action_dto_from_domain,
+    host_action_result_from_dto,
 )
 from foldmind_ai_core.adapters.inbound.http.mappers.documents import (
     index_document_command_from_dto,
-    index_folder_command_from_dto,
+    source_folder_from_dto,
 )
 from foldmind_ai_core.adapters.inbound.http.mappers.indexing import (
     index_document_command_from_request,
-)
-from foldmind_ai_core.adapters.inbound.http.mappers.queries import (
-    retrieval_query_from_dto,
 )
 from foldmind_ai_core.adapters.inbound.http.mappers.tasks import (
     append_task_command_from_request,
@@ -88,30 +85,29 @@ from foldmind_ai_core.adapters.outbound.workflow_runtime.workflow_checkpoint imp
     WorkflowCheckpointState,
 )
 from foldmind_ai_core.core.application.models.llm import LLMMessage
-from foldmind_ai_core.core.application.commands.workflow import (
-    CreateDocumentOutputCommand,
-    CreateFolderOutputCommand,
-    HostActionResultCommand,
-    LinkDocumentsOutputCommand,
-    MoveDocumentOutputCommand,
-    UpdateDocumentOutputCommand,
+from foldmind_ai_core.core.application.ports.outbound.repository.task_repository import (
+    TaskRepositoryPort,
 )
-from foldmind_ai_core.core.application.factories.workflow_results import (
-    host_action_item_result_from_domain,
-    task_result_from_snapshot,
+from foldmind_ai_core.core.application.models.search import (
+    RequestContext,
+    SearchScope,
 )
-from foldmind_ai_core.core.application.ports.outbound.task_repository import TaskRepository
-from foldmind_ai_core.core.application.services.document_retrieval_policy import (
-    DocumentRetrievalConfig,
-)
-from foldmind_ai_core.core.application.services.document_retrieval_service import (
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
+from foldmind_ai_core.core.application.services.retrieval.document_retrieval_service import (
     DocumentRetrievalService,
 )
-from foldmind_ai_core.core.application.services.relationship_scope_resolver import (
+from foldmind_ai_core.core.application.services.retrieval.document_search_service import (
+    DocumentSearchService,
+)
+from foldmind_ai_core.core.application.services.retrieval.policy import (
+    DocumentRetrievalConfig,
+)
+from foldmind_ai_core.core.application.services.retrieval.scope_resolver import (
     RelationshipScopeResolver,
 )
-from foldmind_ai_core.core.application.use_cases.retrieval.find_documents import FindDocumentsUseCase
-from foldmind_ai_core.core.application.workflows.host_actions.build_context import HostActionBuildContext
+from foldmind_ai_core.core.application.workflows.host_actions.build_context import (
+    HostActionBuildContext,
+)
 from foldmind_ai_core.core.application.workflows.state.execution import (
     OutputSpec,
     StepOutcome,
@@ -120,49 +116,45 @@ from foldmind_ai_core.core.application.workflows.state.execution import (
     WorkflowArtifacts,
 )
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.generation.results import (
-    DocumentSearchItem,
-    DocumentSearchResult,
+from foldmind_ai_core.core.application.models.generation import (
     GeneratedTextResult,
 )
-from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
-from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery, RequestContext, SearchScope
-from foldmind_ai_core.core.domain.models.retrieval.results import (
+from foldmind_ai_core.core.domain.models.document_sources import SourceDocument
+from foldmind_ai_core.core.application.models.retrieval import (
     DocumentRetrievalResult,
     RetrievalResult,
     RetrievedDocument,
-    RetrievedFolder,
 )
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.domain.models.document_chunks import DocumentChunk
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
+from foldmind_ai_core.core.domain.models.host_actions import (
     ActionPlan,
     CreateDocumentInput,
     CreateDocumentOutput,
-    CreateFolderInput,
     CreateFolderOutput,
+    CreateFolderInput,
     HostAction,
     HostActionInput,
     HostActionResult,
     HostActionResultType,
     HostActionStatus,
     HostActionType,
-    LinkDocumentsInput,
     LinkDocumentsOutput,
-    MoveDocumentInput,
+    LinkDocumentsInput,
     MoveDocumentOutput,
-    UpdateDocumentInput,
+    MoveDocumentInput,
     UpdateDocumentOutput,
+    UpdateDocumentInput,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.tasks import (
     TaskAnalysis,
     TaskContext,
-    TaskCreationInput,
     TaskFinalResult,
+    TaskInputEntry,
     TaskJob,
     TaskJobResult,
     TaskJobStatus,
     TaskOutputType,
-    TaskInputEntry,
     TaskSnapshot,
     TaskStatus,
 )
@@ -192,31 +184,6 @@ class InMemoryTaskRepository:
     def get(self, *, task_id: str) -> TaskSnapshot | None:
         return self.items.get(task_id)
 
-    def get_by_input_id(self, *, task_input_id: str) -> TaskSnapshot | None:
-        return next(
-            (
-                snapshot
-                for snapshot in self.items.values()
-                for request in snapshot.inputs
-                if request.task_input_id == task_input_id
-            ),
-            None,
-        )
-
-    def get_by_action_id(self, *, action_id: str) -> TaskSnapshot | None:
-        return next(
-            (
-                snapshot
-                for snapshot in self.items.values()
-                for action in snapshot.host_actions
-                if action.action_id == action_id
-            ),
-            None,
-        )
-
-    def save(self, snapshot: TaskSnapshot) -> None:
-        self.items[snapshot.task_id] = snapshot
-
 
 class FakeEmbeddingProvider:
     def embed_texts(self, texts: list[str]) -> list[Vector]:
@@ -226,10 +193,10 @@ class FakeEmbeddingProvider:
 class FakeDocumentChunkVectorStore:
     def __init__(self, results: list[RetrievalResult]) -> None:
         self.results = results
-        self.upserted: list[DocumentChunk] = []
+        self.upserted: list[object] = []
         self.deleted: list[str] = []
 
-    def upsert(self, chunks: list[DocumentChunk], vectors: list[Vector]) -> None:
+    def upsert(self, chunks: list[object], vectors: list[Vector]) -> None:
         self.upserted.extend(chunks)
 
     def delete(self, *, document_id: str) -> None:
@@ -259,7 +226,7 @@ class FakeDocumentVectorStore:
         *,
         tenant: str,
         document_id: str,
-        chunks: tuple[DocumentChunk, ...],
+        chunks: tuple[object, ...],
         vectors: tuple[Vector, ...],
     ) -> None:
         self.chunks.upsert(list(chunks), list(vectors))
@@ -275,6 +242,7 @@ class FakeDocumentVectorStore:
     def delete_document_chunks(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         self.chunks.delete(document_id=document_id)
@@ -282,6 +250,7 @@ class FakeDocumentVectorStore:
     def delete_document_vector(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Document vector deletes are not expected in these tests.")
@@ -321,6 +290,126 @@ def make_document_vector_store(
     )
 
 
+class FakeDocumentSourceRepository:
+    async def get_current_document_sources(
+        self,
+        *,
+        tenant: str,
+        document_ids: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        return ()
+
+    async def document_ids_for_scope(
+        self,
+        *,
+        tenant: str,
+        document_type: str | None,
+        document_id: str | None,
+        document_ids: tuple[str, ...],
+        created_at: object,
+        updated_at: object,
+        metadata_filter: object,
+    ) -> tuple[str, ...]:
+        if document_ids:
+            return document_ids
+        if document_id is not None:
+            return (document_id,)
+        return ()
+
+    async def search_titles_by_keyword(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        document_type: str | None,
+        document_id: str | None,
+        document_ids: tuple[str, ...],
+        created_at: object,
+        updated_at: object,
+        metadata_filter: object,
+    ) -> tuple[object, ...]:
+        return ()
+
+
+class FakeDocumentProjectionRepository:
+    async def get_first_chunks_for_documents(
+        self,
+        *,
+        tenant: str,
+        document_ids: tuple[str, ...],
+        limit: int,
+    ) -> tuple[object, ...]:
+        return ()
+
+    async def search_chunks_by_keyword(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        document_id: str | None,
+        document_ids: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        return ()
+
+
+class FakeDocumentRelationRepository:
+    async def document_ids_for_folders(
+        self,
+        *,
+        tenant: str,
+        folder_ids: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return ()
+
+
+class FakeFolderSourceRepository:
+    async def search_names_by_keyword(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        folder_ids: tuple[str, ...],
+        created_at: object,
+        updated_at: object,
+    ) -> tuple[object, ...]:
+        return ()
+
+    async def search_descriptions_by_keyword(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        folder_ids: tuple[str, ...],
+        created_at: object,
+        updated_at: object,
+    ) -> tuple[object, ...]:
+        return ()
+
+
+class FakeRetrievalReadSession:
+    document_sources = FakeDocumentSourceRepository()
+    document_projections = FakeDocumentProjectionRepository()
+    document_relations = FakeDocumentRelationRepository()
+    folder_sources = FakeFolderSourceRepository()
+
+
+class FakeRetrievalReadSessionScope:
+    async def __aenter__(self) -> FakeRetrievalReadSession:
+        return FakeRetrievalReadSession()
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+        return None
+
+
+class FakeRetrievalReadSessionProvider:
+    def session(self) -> FakeRetrievalReadSessionScope:
+        return FakeRetrievalReadSessionScope()
+
+
 class FakeGraphStore:
     def __init__(self, results: list[DocumentRetrievalResult]) -> None:
         self.results = results
@@ -345,19 +434,21 @@ class FakeGraphStore:
     def delete_document(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Graph document deletes are not expected in these tests.")
 
-    def delete_folder(self, *, folder_id: str) -> None:
+    def delete_folder(self, *, tenant: str, folder_id: str) -> None:
         raise AssertionError("Graph folder deletes are not expected in these tests.")
 
-    def delete_folder_signals(self, *, folder_id: str) -> None:
+    def delete_folder_signals(self, *, tenant: str, folder_id: str) -> None:
         raise AssertionError("Folder signal deletes are not expected in these tests.")
 
     def delete_stale_folder_signals(
         self,
         *,
+        tenant: str,
         folder_id: str,
         current_folder_signal_input_digest: str,
     ) -> None:
@@ -381,22 +472,23 @@ class FakeGraphStore:
         *,
         tenant: str,
         document_ids: tuple[str, ...],
-    ) -> dict[str, tuple[RetrievedFolder, ...]]:
+    ) -> dict[str, tuple[SourceFolder, ...]]:
         return {}
 
 
-def make_find_documents_use_case(
+def make_document_search_service(
     *,
     documents: FakeDocumentVectorStore,
     graph: FakeGraphStore,
     config: DocumentRetrievalConfig,
-) -> FindDocumentsUseCase:
-    return FindDocumentsUseCase(
+) -> DocumentSearchService:
+    return DocumentSearchService(
         retrieval=DocumentRetrievalService(
             embeddings=FakeEmbeddingProvider(),
             chunk_vectors=documents,
             document_vectors=documents,
             graph=graph,
+            retrieval_reads=FakeRetrievalReadSessionProvider(),
             config=config,
         ),
         scope_resolver=RelationshipScopeResolver(graph=graph),
@@ -414,18 +506,17 @@ def make_chunk(chunk_id: str, text: str = "text") -> DocumentChunk:
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id=chunk_id,
         chunk_index=0,
-        chunking_version="chunking-test-v1",
         text=text,
-        text_hash="hash-1",
         start_offset=0,
         end_offset=len(text),
-        embedding_model="test-embedding",
-        embedding_version="test-v1",
-        index_schema_version="schema-v1",
     )
 
 
-def make_chunk_for_entity(document_id: str, chunk_id: str, text: str = "text") -> DocumentChunk:
+def make_chunk_for_entity(
+    document_id: str,
+    chunk_id: str,
+    text: str = "text",
+) -> DocumentChunk:
     return DocumentChunk(
         tenant="tenant-1",
         document_type="document",
@@ -436,18 +527,13 @@ def make_chunk_for_entity(document_id: str, chunk_id: str, text: str = "text") -
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id=chunk_id,
         chunk_index=0,
-        chunking_version="chunking-test-v1",
         text=text,
-        text_hash="hash-1",
         start_offset=0,
         end_offset=len(text),
-        embedding_model="test-embedding",
-        embedding_version="test-v1",
-        index_schema_version="schema-v1",
     )
 
 
-class ContractTests(unittest.TestCase):
+class ContractTests(unittest.IsolatedAsyncioTestCase):
     def assert_json_safe(self, value: object) -> None:
         self.assertFalse(is_dataclass(value))
         self.assertFalse(isinstance(value, Enum))
@@ -485,7 +571,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(action.action_type, HostActionType.MOVE_DOCUMENT)
         self.assertIsInstance(action.input, MoveDocumentInput)
 
-        dto = host_action_dto_from_result(host_action_item_result_from_domain(action))
+        dto = host_action_dto_from_domain(action)
 
         self.assertEqual(dto.action_type, HostActionType.MOVE_DOCUMENT)
         self.assertIsInstance(dto.input, MoveDocumentInputDTO)
@@ -494,51 +580,13 @@ class ContractTests(unittest.TestCase):
         create_folder = HostAction(
             action_type=HostActionType.CREATE_FOLDER,
             summary="Create the recommended folder.",
-            input=CreateFolderInput(name="창업"),
+            input=CreateFolderInput(name="Research"),
         )
-        create_folder_dto = host_action_dto_from_result(
-            host_action_item_result_from_domain(create_folder)
-        )
+        create_folder_dto = host_action_dto_from_domain(create_folder)
 
         self.assertEqual(create_folder_dto.action_type, HostActionType.CREATE_FOLDER)
         self.assertIsInstance(create_folder_dto.input, CreateFolderInputDTO)
-        self.assertEqual(create_folder_dto.input.name, "창업")
-
-        update_document = HostAction(
-            action_type=HostActionType.UPDATE_DOCUMENT,
-            summary="Update document metadata.",
-            input=UpdateDocumentInput(
-                document_type="document",
-                document_id="doc-1",
-                title="Updated title",
-            ),
-        )
-        update_document_dto = host_action_dto_from_result(
-            host_action_item_result_from_domain(update_document)
-        )
-
-        self.assertEqual(update_document_dto.action_type, HostActionType.UPDATE_DOCUMENT)
-        self.assertIsInstance(update_document_dto.input, UpdateDocumentInputDTO)
-        self.assertEqual(update_document_dto.input.title, "Updated title")
-
-        link_documents = HostAction(
-            action_type=HostActionType.LINK_DOCUMENTS,
-            summary="Link documents.",
-            input=LinkDocumentsInput(
-                source_type="document",
-                source_id="doc-1",
-                target_type="document",
-                target_id="doc-2",
-            ),
-        )
-        link_documents_dto = host_action_dto_from_result(
-            host_action_item_result_from_domain(link_documents)
-        )
-
-        self.assertEqual(link_documents_dto.action_type, HostActionType.LINK_DOCUMENTS)
-        self.assertIsInstance(link_documents_dto.input, LinkDocumentsInputDTO)
-        self.assertEqual(link_documents_dto.input.target_id, "doc-2")
-
+        self.assertEqual(create_folder_dto.input.name, "Research")
     def test_host_action_input_does_not_allow_untyped_dict_payload(self) -> None:
         self.assertNotIn(dict[str, object], get_args(HostActionInput))
         self.assertFalse(
@@ -584,44 +632,39 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(scope.folder_ids, ("folder-1",))
 
     def test_task_snapshot_keeps_input_entries(self) -> None:
-        request = TaskCreationInput(
-            tenant="tenant-1",
-            request="Summarize related meeting notes.",
-            context=TaskContext(requested_at="2026-05-17T09:30:00+09:00"),
-        )
+        task_input_id = "task-input-1"
+        request_text = "Summarize related meeting notes."
+        context = TaskContext(requested_at="2026-05-17T09:30:00+09:00")
         snapshot = TaskSnapshot(
             task_id=TASK_ID,
-            tenant=request.tenant,
-            request=request.request,
-            context=request.context,
+            tenant="tenant-1",
+            request=request_text,
+            context=context,
             status=TaskStatus.COMPLETED,
             analysis=TaskAnalysis(message="Done."),
             inputs=[
                 TaskInputEntry(
-                    task_input_id=request.task_input_id,
+                    task_input_id=task_input_id,
                     task_id=TASK_ID,
-                    input_text=request.request,
-                    context=request.context,
+                    input_text=request_text,
+                    context=context,
                     position=0,
                 )
             ],
         )
 
-        self.assertEqual(snapshot.inputs[0].task_input_id, request.task_input_id)
+        self.assertEqual(snapshot.inputs[0].task_input_id, task_input_id)
         self.assertEqual(snapshot.status, TaskStatus.COMPLETED)
 
     def test_application_ports_are_structural(self) -> None:
-        store: TaskRepository = InMemoryTaskRepository()
-        request = TaskCreationInput(
-            tenant="tenant-1",
-            request="Test",
-            context=TaskContext(requested_at="2026-05-17T09:30:00+09:00"),
-        )
+        store: TaskRepositoryPort = InMemoryTaskRepository()
+        request_text = "Test"
+        context = TaskContext(requested_at="2026-05-17T09:30:00+09:00")
         snapshot = TaskSnapshot(
             task_id=TASK_ID,
-            tenant=request.tenant,
-            request=request.request,
-            context=request.context,
+            tenant="tenant-1",
+            request=request_text,
+            context=context,
             status=TaskStatus.COMPLETED,
             analysis=TaskAnalysis(message="Done."),
         )
@@ -648,10 +691,10 @@ class ContractTests(unittest.TestCase):
 
         self.assertIsInstance(request.document, SourceDocumentDTO)
         self.assertNotIsInstance(command, SourceDocument)
-        self.assertEqual(command.tenant, "tenant-1")
-        self.assertEqual(command.document_type, "document")
-        self.assertEqual(command.document_id, DOCUMENT_ID)
-        self.assertEqual(command.source_version, "v1")
+        self.assertEqual(command.document.tenant, "tenant-1")
+        self.assertEqual(command.document.document_type, "document")
+        self.assertEqual(command.document.document_id, DOCUMENT_ID)
+        self.assertEqual(command.document.source_version, "v1")
 
     def test_api_dtos_normalize_identity_fields_before_mapping(self) -> None:
         document = index_document_command_from_dto(SourceDocumentDTO(
@@ -664,7 +707,7 @@ class ContractTests(unittest.TestCase):
             title=" Title ",
             body=" Body ",
         ))
-        folder = index_folder_command_from_dto(SourceFolderDTO(
+        folder = source_folder_from_dto(SourceFolderDTO(
             tenant=" tenant-1 ",
             folder_id=f" {FOLDER_ID} ",
             source_version=" folder-v1 ",
@@ -672,26 +715,6 @@ class ContractTests(unittest.TestCase):
             updated_at=" 2026-05-02T11:00:00+09:00 ",
             name=" Startup ",
             parent_folder_id=f" {FOLDER_ID_2} ",
-        ))
-        query = retrieval_query_from_dto(RetrievalQueryDTO(
-            text=" Find the last meeting notes ",
-            request_context={
-                "tenant": " tenant-1 ",
-                "requested_at": " 2026-05-17T09:30:00+09:00 ",
-            },
-            scope={
-                "document_type": " document ",
-                "document_id": f" {DOCUMENT_ID} ",
-                "document_ids": [f" {DOCUMENT_ID_2} "],
-                "folder_ids": [f" {FOLDER_ID} "],
-                "created_at": {"gte": " 2026-05-01T00:00:00+09:00 "},
-                "sort": {"field": "created_at", "direction": "desc"},
-            },
-            anchor={
-                "document_type": " document ",
-                "document_id": f" {DOCUMENT_ID} ",
-                "source_version": " v1 ",
-            },
         ))
         task = create_task_command_from_request(CreateTaskRequest(
             tenant=" tenant-1 ",
@@ -712,7 +735,7 @@ class ContractTests(unittest.TestCase):
             ),
             task_id=f" {TASK_ID} ",
         )
-        result = host_action_result_command_from_dto(HostActionResultDTO(
+        result = host_action_result_from_dto(HostActionResultDTO(
             action_id=f" {ACTION_ID} ",
             action_type=HostActionType.LINK_DOCUMENTS,
             outcome=HostActionResultType.SUCCEEDED,
@@ -726,30 +749,17 @@ class ContractTests(unittest.TestCase):
             ),
         ))
 
-        self.assertEqual(document.tenant, "tenant-1")
-        self.assertEqual(document.document_type, "document")
-        self.assertEqual(document.document_id, DOCUMENT_ID)
-        self.assertEqual(document.source_version, "v1")
-        self.assertEqual(document.title, " Title ")
-        self.assertEqual(document.body, " Body ")
+        self.assertEqual(document.document.tenant, "tenant-1")
+        self.assertEqual(document.document.document_type, "document")
+        self.assertEqual(document.document.document_id, DOCUMENT_ID)
+        self.assertEqual(document.document.source_version, "v1")
+        self.assertEqual(document.document.title, " Title ")
+        self.assertEqual(document.document.body, " Body ")
         self.assertEqual(folder.tenant, "tenant-1")
         self.assertEqual(folder.folder_id, FOLDER_ID)
         self.assertEqual(folder.source_version, "folder-v1")
         self.assertEqual(folder.parent_folder_id, FOLDER_ID_2)
         self.assertEqual(folder.name, "Startup")
-        self.assertEqual(query.request_context.tenant, "tenant-1")
-        self.assertEqual(query.request_context.requested_at, "2026-05-17T09:30:00+09:00")
-        self.assertEqual(query.scope.document_type, "document")
-        self.assertEqual(query.scope.document_id, DOCUMENT_ID)
-        self.assertEqual(query.scope.document_ids, (DOCUMENT_ID_2,))
-        self.assertEqual(query.scope.folder_ids, (FOLDER_ID,))
-        self.assertEqual(query.scope.created_at.gte, "2026-05-01T00:00:00+09:00")
-        self.assertEqual(query.scope.sort.field, "created_at")
-        self.assertEqual(query.scope.sort.direction, "desc")
-        self.assertEqual(query.anchor.document_type, "document")
-        self.assertEqual(query.anchor.document_id, DOCUMENT_ID)
-        self.assertEqual(query.anchor.source_version, "v1")
-        self.assertEqual(query.text, " Find the last meeting notes ")
         self.assertEqual(task.tenant, "tenant-1")
         self.assertEqual(task.request, "Summarize the document")
         self.assertEqual(task.context.requested_at, "2026-05-17T09:30:00+09:00")
@@ -783,7 +793,7 @@ class ContractTests(unittest.TestCase):
             },
         )
 
-        response = task_snapshot_response_from_result(task_result_from_snapshot(snapshot))
+        response = task_snapshot_response_from_result(snapshot)
 
         self.assertEqual(response.task.status, TaskStatus.COMPLETED)
         self.assertEqual(response.task.analysis.message, "Done.")
@@ -827,14 +837,9 @@ class ContractTests(unittest.TestCase):
                             updated_at="2026-05-02T11:00:00+09:00",
                             chunk_id="chunk-1",
                             chunk_index=0,
-                            chunking_version="chunking-test-v1",
                             text="Evidence",
-                            text_hash="hash-1",
                             start_offset=0,
                             end_offset=8,
-                            embedding_model="test-embedding",
-                            embedding_version="test-v1",
-                            index_schema_version="schema-v1",
                         ),
                         score=0.7,
                     )
@@ -877,41 +882,41 @@ class ContractTests(unittest.TestCase):
             {"source_tags": ["startup"]},
         )
 
-    def test_action_result_dto_maps_to_command(self) -> None:
-        result = host_action_result_command_from_dto(HostActionResultDTO(
+    def test_action_result_dto_maps_to_domain_result(self) -> None:
+        result = host_action_result_from_dto(HostActionResultDTO(
             action_id=ACTION_ID,
             outcome="failed",
             error=" Execution failed. ",
         ))
 
-        self.assertIsInstance(result, HostActionResultCommand)
-        self.assertEqual(result.outcome, HostActionResultType.FAILED.value)
+        self.assertIsInstance(result, HostActionResult)
+        self.assertEqual(result.outcome, HostActionResultType.FAILED)
         self.assertEqual(result.error, "Execution failed.")
         self.assertIsNone(result.output)
 
-        created = host_action_result_command_from_dto(HostActionResultDTO(
+        created = host_action_result_from_dto(HostActionResultDTO(
             action_id=ACTION_ID_2,
             action_type=HostActionType.CREATE_DOCUMENT,
             outcome=HostActionResultType.SUCCEEDED,
             output=CreateDocumentOutputDTO(created_document_id=DOCUMENT_ID),
         ))
 
-        self.assertEqual(created.action_type, HostActionType.CREATE_DOCUMENT.value)
-        self.assertIsInstance(created.output, CreateDocumentOutputCommand)
+        self.assertEqual(created.action_type, HostActionType.CREATE_DOCUMENT)
+        self.assertIsInstance(created.output, CreateDocumentOutput)
         self.assertEqual(created.output.created_document_id, DOCUMENT_ID)
 
-        folder = host_action_result_command_from_dto(HostActionResultDTO(
+        folder = host_action_result_from_dto(HostActionResultDTO(
             action_id=ACTION_ID_3,
             action_type=HostActionType.CREATE_FOLDER,
             outcome=HostActionResultType.SUCCEEDED,
             output=CreateFolderOutputDTO(folder_id=FOLDER_ID, name="창업"),
         ))
 
-        self.assertEqual(folder.action_type, HostActionType.CREATE_FOLDER.value)
-        self.assertIsInstance(folder.output, CreateFolderOutputCommand)
+        self.assertEqual(folder.action_type, HostActionType.CREATE_FOLDER)
+        self.assertIsInstance(folder.output, CreateFolderOutput)
         self.assertEqual(folder.output.folder_id, FOLDER_ID)
 
-        updated = host_action_result_command_from_dto(HostActionResultDTO(
+        updated = host_action_result_from_dto(HostActionResultDTO(
             action_id=ACTION_ID_4,
             action_type=HostActionType.UPDATE_DOCUMENT,
             outcome=HostActionResultType.SUCCEEDED,
@@ -922,11 +927,11 @@ class ContractTests(unittest.TestCase):
             ),
         ))
 
-        self.assertEqual(updated.action_type, HostActionType.UPDATE_DOCUMENT.value)
-        self.assertIsInstance(updated.output, UpdateDocumentOutputCommand)
+        self.assertEqual(updated.action_type, HostActionType.UPDATE_DOCUMENT)
+        self.assertIsInstance(updated.output, UpdateDocumentOutput)
         self.assertEqual(updated.output.updated_document_id, DOCUMENT_ID)
 
-        moved = host_action_result_command_from_dto(HostActionResultDTO(
+        moved = host_action_result_from_dto(HostActionResultDTO(
             action_id=ACTION_ID_5,
             action_type=HostActionType.MOVE_DOCUMENT,
             outcome=HostActionResultType.SUCCEEDED,
@@ -937,11 +942,11 @@ class ContractTests(unittest.TestCase):
             ),
         ))
 
-        self.assertEqual(moved.action_type, HostActionType.MOVE_DOCUMENT.value)
-        self.assertIsInstance(moved.output, MoveDocumentOutputCommand)
+        self.assertEqual(moved.action_type, HostActionType.MOVE_DOCUMENT)
+        self.assertIsInstance(moved.output, MoveDocumentOutput)
         self.assertEqual(moved.output.target_folder_id, FOLDER_ID_2)
 
-        linked = host_action_result_command_from_dto(HostActionResultDTO(
+        linked = host_action_result_from_dto(HostActionResultDTO(
             action_id=ACTION_ID_6,
             action_type=HostActionType.LINK_DOCUMENTS,
             outcome=HostActionResultType.SUCCEEDED,
@@ -954,8 +959,8 @@ class ContractTests(unittest.TestCase):
             ),
         ))
 
-        self.assertEqual(linked.action_type, HostActionType.LINK_DOCUMENTS.value)
-        self.assertIsInstance(linked.output, LinkDocumentsOutputCommand)
+        self.assertEqual(linked.action_type, HostActionType.LINK_DOCUMENTS)
+        self.assertIsInstance(linked.output, LinkDocumentsOutput)
         self.assertEqual(linked.output.link_id, "link-1")
 
     def test_action_result_output_matches_action_type(self) -> None:
@@ -999,7 +1004,6 @@ class ContractTests(unittest.TestCase):
             title="Title",
             body="Body",
         )
-        query = RetrievalQueryDTO(text=" ", request_context={"tenant": "tenant-1"})
         result = HostActionResultDTO(
             action_id="",
             outcome=HostActionResultType.SUCCEEDED,
@@ -1022,10 +1026,7 @@ class ContractTests(unittest.TestCase):
             index_document_command_from_dto(invalid_uuid_document)
 
         with self.assertRaises(InvalidInputError):
-            retrieval_query_from_dto(query)
-
-        with self.assertRaises(InvalidInputError):
-            host_action_result_command_from_dto(result)
+            host_action_result_from_dto(result)
 
     def test_application_models_are_plain_state_containers(self) -> None:
         context = RequestContext(tenant=" ", requested_at="2026-05-17T09:30:00+09:00")
@@ -1042,12 +1043,10 @@ class ContractTests(unittest.TestCase):
         )
         query = RetrievalQuery(
             text="   ",
-            request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"),
-        )
-        request = TaskCreationInput(
-            tenant="tenant-1",
-            request="",
-            context=TaskContext(requested_at="2026-05-17T09:30:00+09:00"),
+            request_context=RequestContext(
+                tenant="tenant-1",
+                requested_at="2026-05-17T09:30:00+09:00",
+            ),
         )
 
         self.assertEqual(context.tenant, " ")
@@ -1056,7 +1055,6 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(document_output.created_document_id, "")
         self.assertEqual(action_result.action_id, "")
         self.assertEqual(query.text, "   ")
-        self.assertEqual(request.request, "")
 
     def test_api_dtos_do_not_use_domain_models_as_fields(self) -> None:
         dto_field_types = {
@@ -1151,7 +1149,7 @@ class ContractTests(unittest.TestCase):
             ),
         )
 
-        response = task_snapshot_response_from_result(task_result_from_snapshot(snapshot))
+        response = task_snapshot_response_from_result(snapshot)
 
         self.assertEqual(response.task.analysis.message, "Done.")
         self.assertIsNotNone(response.task.result)
@@ -1164,12 +1162,21 @@ class ContractTests(unittest.TestCase):
         self.assertFalse(hasattr(response.task.jobs[0].results[0], "result"))
 
     def test_models_are_split_by_layer_concern(self) -> None:
-        self.assertEqual(RetrievalQuery.__module__, "foldmind_ai_core.core.application.queries.retrieval")
-        self.assertEqual(RetrievalResult.__module__, "foldmind_ai_core.core.domain.models.retrieval.results")
-        self.assertEqual(LLMMessage.__module__, "foldmind_ai_core.core.application.models.llm")
+        self.assertEqual(
+            RetrievalQuery.__module__,
+            "foldmind_ai_core.core.application.models.retrieval",
+        )
+        self.assertEqual(
+            RetrievalResult.__module__,
+            "foldmind_ai_core.core.application.models.retrieval",
+        )
+        self.assertEqual(
+            LLMMessage.__module__,
+            "foldmind_ai_core.core.application.models.llm",
+        )
         self.assertEqual(
             GeneratedTextResult.__module__,
-            "foldmind_ai_core.core.domain.models.generation.results",
+            "foldmind_ai_core.core.application.models.generation",
         )
         self.assertEqual(
             OutputSpec.__module__,
@@ -1199,10 +1206,13 @@ class ContractTests(unittest.TestCase):
             WorkflowState.__module__,
             "foldmind_ai_core.core.application.workflows.state.workflow_state",
         )
-        self.assertEqual(TaskSnapshot.__module__, "foldmind_ai_core.core.domain.models.workflow.tasks")
+        self.assertEqual(
+            TaskSnapshot.__module__,
+            "foldmind_ai_core.core.domain.models.tasks",
+        )
         self.assertFalse(hasattr(api_dto_package, "WorkflowCheckpointState"))
 
-    def test_find_documents_use_case_uses_dense_chunk_results(self) -> None:
+    async def test_document_search_service_uses_dense_chunk_results(self) -> None:
         chunk_a = make_chunk("doc-a:chunk:0")
         chunk_b = make_chunk("doc-b:chunk:0")
 
@@ -1212,18 +1222,26 @@ class ContractTests(unittest.TestCase):
                 RetrievalResult(chunk=chunk_b, score=0.90),
             ]
         )
-        results = make_find_documents_use_case(
+        results = await make_document_search_service(
             documents=documents,
             graph=FakeGraphStore([]),
             config=DocumentRetrievalConfig(top_k=2),
-        ).execute(RetrievalQuery(text="meeting notes", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00")))
+        ).search(
+            RetrievalQuery(
+                text="meeting notes",
+                request_context=RequestContext(
+                    tenant="tenant-1",
+                    requested_at="2026-05-17T09:30:00+09:00",
+                ),
+            )
+        )
 
         self.assertEqual(
-            [result.chunk_id for result in results.results],
+            [result.chunk.chunk_id for result in results],
             ["doc-a:chunk:0", "doc-b:chunk:0"],
         )
 
-    def test_comprehensive_search_merges_metadata_candidates(self) -> None:
+    async def test_comprehensive_search_merges_metadata_candidates(self) -> None:
         dense = [
             RetrievalResult(
                 chunk=make_chunk_for_entity("doc-a", "doc-a:chunk:dense"),
@@ -1254,17 +1272,23 @@ class ContractTests(unittest.TestCase):
             ],
         )
 
-        results = make_find_documents_use_case(
+        results = await make_document_search_service(
             documents=documents,
             graph=FakeGraphStore(graph),
             config=DocumentRetrievalConfig(comprehensive_top_k=10),
-        ).execute(
-            RetrievalQuery(text="창업", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00")),
+        ).search(
+            RetrievalQuery(
+                text="창업",
+                request_context=RequestContext(
+                    tenant="tenant-1",
+                    requested_at="2026-05-17T09:30:00+09:00",
+                ),
+            ),
             require_comprehensive_search=True,
         )
 
         self.assertEqual(
-            {result.document_id for result in results.results},
+            {result.chunk.document_id for result in results},
             {"doc-a", "doc-c"},
         )
 
@@ -1273,7 +1297,12 @@ class ContractTests(unittest.TestCase):
             parent for parent in Path(__file__).resolve().parents if (parent / "src").exists()
         )
         agents_dir = (
-            project_root / "src" / "foldmind_ai_core" / "application" / "agents"
+            project_root
+            / "src"
+            / "foldmind_ai_core"
+            / "core"
+            / "application"
+            / "agents"
         )
 
         for path in agents_dir.glob("*.py"):

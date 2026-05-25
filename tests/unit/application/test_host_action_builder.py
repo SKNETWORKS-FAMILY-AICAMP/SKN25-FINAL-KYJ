@@ -4,19 +4,24 @@ import unittest
 import uuid
 
 from foldmind_ai_core.core.application.workflows.host_actions.builder import HostActionBuilder
-from foldmind_ai_core.core.domain.models.generation.results import (
+from foldmind_ai_core.core.application.models.generation import (
     DraftResult,
     FolderRecommendation,
     FolderRecommendationResult,
     GeneratedTextResult,
 )
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.domain.models.host_actions import (
     CreateDocumentInput,
     HostActionStatus,
     HostActionType,
     MoveDocumentInput,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskAnalysis, TaskContext, TaskSnapshot, TaskStatus
+from foldmind_ai_core.core.domain.models.tasks import (
+    TaskAnalysis,
+    TaskContext,
+    TaskSnapshot,
+    TaskStatus,
+)
 
 DOCUMENT_ID = "11111111-1111-4111-8111-111111111111"
 FOLDER_ID = "22222222-2222-4222-8222-222222222222"
@@ -239,6 +244,7 @@ class HostActionBuilderTests(unittest.TestCase):
                 folder_recommendation=_folder_recommendation(),
                 requested_actions=(HostActionType.MOVE_DOCUMENT,),
             )
+
 
 def _task(*, metadata: dict[str, object] | None = None) -> TaskSnapshot:
     return TaskSnapshot(

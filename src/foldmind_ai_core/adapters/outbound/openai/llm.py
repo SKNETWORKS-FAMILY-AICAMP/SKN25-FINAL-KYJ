@@ -19,11 +19,11 @@ class OpenAILLMProvider:
     def __post_init__(self) -> None:
         require_non_blank(self.model, "model")
 
-    def generate(self, messages: list[LLMMessage]) -> str:
+    async def generate(self, messages: list[LLMMessage]) -> str:
         if not messages:
             raise InvalidInputError("messages must not be empty.")
         try:
-            response = self.client.create_response(
+            response = await self.client.create_response(
                 model=self.model,
                 input=[
                     {

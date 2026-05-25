@@ -52,13 +52,13 @@ class Neo4jDocumentSignalNodeRecord:
     document_id: str
     source_version: str
     content_digest: str
-    document_signal_input_digest: str = ""
+    document_signal_input_digest: str
+    extractor_name: str
+    extractor_version: str
     signal_generation_version: str = "1"
     attributes_json: str = "{}"
     evidence_json: str = "[]"
     confidence: float | None = None
-    extractor_name: str = ""
-    extractor_version: str = ""
     generation_model: str | None = None
     metadata_json: str = "{}"
 
@@ -74,11 +74,11 @@ class Neo4jFolderSignalNodeRecord:
     signal_type: str
     signal_key: str
     text: str
+    extractor_name: str
+    extractor_version: str
     related_document_id: str | None = None
     attributes_json: str = "{}"
     evidence_json: str = "[]"
     confidence: float | None = None
-    extractor_name: str = ""
-    extractor_version: str = ""
     generation_model: str | None = None
     metadata_json: str = "{}"

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
 from foldmind_ai_core.core.application.workflows import option_values
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery
-from foldmind_ai_core.core.domain.models.workflow.actions import HostActionType
+from foldmind_ai_core.core.domain.models.document_sources import SourceDocument
+from foldmind_ai_core.core.domain.models.host_actions import HostActionType
 from foldmind_ai_core.shared.types import JsonObject
 
 _MISSING = object()

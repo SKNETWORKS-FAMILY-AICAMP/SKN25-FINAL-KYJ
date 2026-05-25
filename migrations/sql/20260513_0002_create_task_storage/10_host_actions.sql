@@ -25,8 +25,8 @@ CREATE TABLE host_actions (
         jsonb_typeof(policy_json) = 'object'
     ),
     input_json jsonb NOT NULL CHECK (jsonb_typeof(input_json) = 'object'),
-    metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
-        jsonb_typeof(metadata) = 'object'
+    metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
+        jsonb_typeof(metadata_json) = 'object'
     ),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),

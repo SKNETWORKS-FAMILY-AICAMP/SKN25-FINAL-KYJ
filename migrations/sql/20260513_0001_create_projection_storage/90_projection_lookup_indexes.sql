@@ -38,6 +38,19 @@ CREATE INDEX document_chunks_search_idx
 CREATE INDEX folder_sources_tenant_updated_idx
     ON folder_sources (tenant_id, updated_at DESC);
 
+-- folder_sources_parent_idx
+CREATE INDEX folder_sources_parent_idx
+    ON folder_sources (tenant_id, parent_folder_id)
+    WHERE deleted_at IS NULL;
+
+-- folder_sources_name_search_idx
+CREATE INDEX folder_sources_name_search_idx
+    ON folder_sources USING gin (name_search_vector);
+
+-- folder_sources_description_search_idx
+CREATE INDEX folder_sources_description_search_idx
+    ON folder_sources USING gin (description_search_vector);
+
 -- folder_sources_purge_idx
 CREATE INDEX folder_sources_purge_idx
     ON folder_sources (purge_after)

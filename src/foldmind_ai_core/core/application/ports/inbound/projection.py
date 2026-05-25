@@ -2,102 +2,108 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from foldmind_ai_core.core.application.commands.projection import (
+from foldmind_ai_core.core.application.models.projection_commands import (
     DeleteDocumentProjectionCommand,
     DeleteFolderProjectionCommand,
     InvalidateFolderSignalsCommand,
-    ProjectDocumentFolderRelationsCommand,
     ProjectDocumentCommand,
+    ProjectDocumentFolderRelationsCommand,
     ProjectFolderCommand,
     ProjectFolderSignalsCommand,
 )
 
 
-class ProjectDocumentChunkVectorsInboundPort(Protocol):
-    def execute(self, command: ProjectDocumentCommand) -> None:
+class DocumentVectorProjectionServicePort(Protocol):
+    async def project_document_chunks(self, command: ProjectDocumentCommand) -> None:
+        ...
+
+    async def delete_document_chunks(
+        self,
+        command: DeleteDocumentProjectionCommand,
+    ) -> None:
+        ...
+
+    async def project_document_vector(self, command: ProjectDocumentCommand) -> None:
+        ...
+
+    async def delete_document_vector(
+        self,
+        command: DeleteDocumentProjectionCommand,
+    ) -> None:
+        ...
+
+    async def project_document_signals(self, command: ProjectDocumentCommand) -> None:
+        ...
+
+    async def delete_document_signals(
+        self,
+        command: DeleteDocumentProjectionCommand,
+    ) -> None:
         ...
 
 
-class DeleteDocumentChunkVectorsInboundPort(Protocol):
-    def execute(self, command: DeleteDocumentProjectionCommand) -> None:
+class FolderVectorProjectionServicePort(Protocol):
+    async def project_folder_vector(self, command: ProjectFolderCommand) -> None:
+        ...
+
+    async def delete_folder_vector(
+        self,
+        command: DeleteFolderProjectionCommand,
+    ) -> None:
+        ...
+
+    async def project_folder_signals(
+        self,
+        command: ProjectFolderSignalsCommand,
+    ) -> None:
+        ...
+
+    async def invalidate_folder_signals(
+        self,
+        command: InvalidateFolderSignalsCommand,
+    ) -> None:
+        ...
+
+    async def delete_folder_signals(
+        self,
+        command: DeleteFolderProjectionCommand,
+    ) -> None:
         ...
 
 
-class ProjectDocumentVectorInboundPort(Protocol):
-    def execute(self, command: ProjectDocumentCommand) -> None:
+class GraphProjectionServicePort(Protocol):
+    async def project_document_graph(self, command: ProjectDocumentCommand) -> None:
         ...
 
-
-class DeleteDocumentVectorInboundPort(Protocol):
-    def execute(self, command: DeleteDocumentProjectionCommand) -> None:
+    async def project_document_folder_relations(
+        self,
+        command: ProjectDocumentFolderRelationsCommand,
+    ) -> None:
         ...
 
-
-class ProjectDocumentSignalVectorsInboundPort(Protocol):
-    def execute(self, command: ProjectDocumentCommand) -> None:
+    async def delete_document_graph(
+        self,
+        command: DeleteDocumentProjectionCommand,
+    ) -> None:
         ...
 
-
-class DeleteDocumentSignalVectorsInboundPort(Protocol):
-    def execute(self, command: DeleteDocumentProjectionCommand) -> None:
+    async def project_folder_graph(self, command: ProjectFolderCommand) -> None:
         ...
 
-
-class ProjectDocumentGraphInboundPort(Protocol):
-    def execute(self, command: ProjectDocumentCommand) -> None:
+    async def project_folder_signals(
+        self,
+        command: ProjectFolderSignalsCommand,
+    ) -> None:
         ...
 
-
-class ProjectDocumentFolderRelationsGraphInboundPort(Protocol):
-    def execute(self, command: ProjectDocumentFolderRelationsCommand) -> None:
+    async def invalidate_folder_signals(
+        self,
+        command: InvalidateFolderSignalsCommand,
+    ) -> None:
         ...
 
-
-class DeleteDocumentGraphInboundPort(Protocol):
-    def execute(self, command: DeleteDocumentProjectionCommand) -> None:
-        ...
-
-
-class ProjectFolderVectorInboundPort(Protocol):
-    def execute(self, command: ProjectFolderCommand) -> None:
-        ...
-
-
-class DeleteFolderVectorInboundPort(Protocol):
-    def execute(self, command: DeleteFolderProjectionCommand) -> None:
-        ...
-
-
-class ProjectFolderSignalVectorsInboundPort(Protocol):
-    def execute(self, command: ProjectFolderSignalsCommand) -> None:
-        ...
-
-
-class InvalidateFolderSignalVectorsInboundPort(Protocol):
-    def execute(self, command: InvalidateFolderSignalsCommand) -> None:
-        ...
-
-
-class DeleteFolderSignalVectorsInboundPort(Protocol):
-    def execute(self, command: DeleteFolderProjectionCommand) -> None:
-        ...
-
-
-class ProjectFolderGraphInboundPort(Protocol):
-    def execute(self, command: ProjectFolderCommand) -> None:
-        ...
-
-
-class ProjectFolderSignalsGraphInboundPort(Protocol):
-    def execute(self, command: ProjectFolderSignalsCommand) -> None:
-        ...
-
-
-class InvalidateFolderSignalsGraphInboundPort(Protocol):
-    def execute(self, command: InvalidateFolderSignalsCommand) -> None:
-        ...
-
-
-class DeleteFolderGraphInboundPort(Protocol):
-    def execute(self, command: DeleteFolderProjectionCommand) -> None:
+    async def delete_folder_graph(
+        self,
+        command: DeleteFolderProjectionCommand,
+    ) -> None:
         ...

@@ -9,20 +9,20 @@ from foldmind_ai_core.core.application.workflows.state.execution import (
     WorkflowArtifactName,
 )
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.generation.results import (
+from foldmind_ai_core.core.application.models.generation import (
     DocumentRecommendationResult,
     DraftResult,
     FolderRecommendationResult,
     GeneratedTextResult,
     RelatedRecommendationResult,
 )
-from foldmind_ai_core.core.domain.models.retrieval.results import (
+from foldmind_ai_core.core.application.models.retrieval import (
     FolderRetrievalResult,
     RetrievalResult,
     RetrievedDocument,
     SignalRetrievalResult,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.tasks import (
     TaskFinalResult,
     TaskJob,
     TaskJobResult,
@@ -64,7 +64,7 @@ class WorkflowArtifactRegistry:
         if outcome.artifacts:
             artifact_names = [artifact.value for artifact in outcome.artifacts]
             manifest: JsonObject = {
-                "artifacts_written": artifact_names,
+                "artifacts_written": list(artifact_names),
                 "artifact_count": len(artifact_names),
             }
             job.results.append(

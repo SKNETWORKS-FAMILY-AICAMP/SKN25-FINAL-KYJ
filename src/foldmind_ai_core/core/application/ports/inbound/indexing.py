@@ -2,39 +2,41 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from foldmind_ai_core.core.application.commands.indexing import (
+from foldmind_ai_core.core.application.models.indexing import (
     DeleteDocumentIndexCommand,
     DeleteFolderIndexCommand,
     IndexDocumentCommand,
-    IndexFolderCommand,
-    UpdateDocumentFolderRelationsCommand,
 )
-from foldmind_ai_core.core.application.results.indexing import (
-    IndexDocumentResult,
-    IndexFolderResult,
+from foldmind_ai_core.core.application.models.indexing import IndexDocumentResult
+from foldmind_ai_core.core.domain.models.folder_sources import (
+    FolderSourceIdentity,
+    SourceFolder,
 )
 
 
-class IndexDocumentInboundPort(Protocol):
-    def execute(self, command: IndexDocumentCommand) -> IndexDocumentResult:
+class DocumentIndexingServicePort(Protocol):
+    async def index_document(
+        self,
+        command: IndexDocumentCommand,
+    ) -> IndexDocumentResult:
+        ...
+
+    async def delete_document(
+        self,
+        command: DeleteDocumentIndexCommand,
+    ) -> None:
         ...
 
 
-class DeleteDocumentIndexInboundPort(Protocol):
-    def execute(self, command: DeleteDocumentIndexCommand) -> None:
+class FolderIndexingServicePort(Protocol):
+    async def index_folder(
+        self,
+        folder: SourceFolder,
+    ) -> FolderSourceIdentity:
         ...
 
-
-class UpdateDocumentFolderRelationsInboundPort(Protocol):
-    def execute(self, command: UpdateDocumentFolderRelationsCommand) -> None:
-        ...
-
-
-class IndexFolderInboundPort(Protocol):
-    def execute(self, command: IndexFolderCommand) -> IndexFolderResult:
-        ...
-
-
-class DeleteFolderIndexInboundPort(Protocol):
-    def execute(self, command: DeleteFolderIndexCommand) -> None:
+    async def delete_folder(
+        self,
+        command: DeleteFolderIndexCommand,
+    ) -> None:
         ...

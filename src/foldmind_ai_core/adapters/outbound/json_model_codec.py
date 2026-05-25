@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
+from datetime import datetime
 from enum import StrEnum
 from types import UnionType
 from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
@@ -32,6 +33,8 @@ class JsonModelCodec:
     def encode(self, value: object) -> Any:
         if isinstance(value, StrEnum):
             return str(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
         if value is None or isinstance(value, str | int | float | bool):
             return value
         if is_dataclass(value):
@@ -118,6 +121,8 @@ class JsonModelCodec:
                 JsonModelCodec._coerce_field(item, _tuple_item_annotation(annotation))
                 for item in value
             )
+        if annotation is datetime and isinstance(value, str):
+            return datetime.fromisoformat(value)
         enum_type = _enum_type(annotation)
         if enum_type is not None and isinstance(value, str):
             return enum_type(value)

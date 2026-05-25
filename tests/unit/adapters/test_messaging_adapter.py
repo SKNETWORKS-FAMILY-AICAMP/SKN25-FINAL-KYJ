@@ -9,8 +9,17 @@ from typing import TypeAlias
 from foldmind_ai_core.adapters.inbound.messaging.consumers.document_chunk_vector_consumer import (
     DocumentChunkVectorDeletedConsumer,
 )
+from foldmind_ai_core.adapters.inbound.messaging.consumers.document_signal_vector_consumer import (
+    DocumentSignalVectorsDeletedConsumer,
+    DocumentSignalVectorsIndexedConsumer,
+)
 from foldmind_ai_core.adapters.inbound.messaging.consumers.document_vector_consumer import (
     DocumentVectorIndexedConsumer,
+)
+from foldmind_ai_core.adapters.inbound.messaging.consumers.folder_signal_vector_consumer import (
+    FolderSignalVectorsDeletedConsumer,
+    FolderSignalVectorsIndexedConsumer,
+    FolderSignalVectorsInvalidatedConsumer,
 )
 from foldmind_ai_core.adapters.inbound.messaging.consumers.folder_vector_consumer import (
     FolderVectorIndexedConsumer,
@@ -21,110 +30,164 @@ from foldmind_ai_core.adapters.inbound.messaging.consumers.graph_consumer import
     DocumentGraphIndexedConsumer,
     FolderGraphDeletedConsumer,
     FolderGraphIndexedConsumer,
+    FolderSignalsGraphIndexedConsumer,
+    FolderSignalsGraphInvalidatedConsumer,
 )
 from foldmind_ai_core.adapters.inbound.messaging.dispatcher import OutboxEventDispatcher
 from foldmind_ai_core.adapters.inbound.messaging.message_codec import (
-    document_deleted_event_from_outbox,
-    document_folder_relations_indexed_event_from_outbox,
-    document_indexed_event_from_outbox,
-    folder_deleted_event_from_outbox,
-    folder_indexed_event_from_outbox,
+    delete_document_projection_command_from_outbox,
+    delete_folder_projection_command_from_outbox,
+    project_document_command_from_outbox,
+    project_document_folder_relations_command_from_outbox,
+    project_folder_command_from_outbox,
     outbox_event_from_flattened_payload,
 )
-from foldmind_ai_core.core.application.commands.projection import (
+from foldmind_ai_core.core.application.models.projection_commands import (
     DeleteDocumentProjectionCommand,
     DeleteFolderProjectionCommand,
-    ProjectDocumentFolderRelationsCommand,
+    InvalidateFolderSignalsCommand,
     ProjectDocumentCommand,
+    ProjectDocumentFolderRelationsCommand,
     ProjectFolderCommand,
+    ProjectFolderSignalsCommand,
 )
-from foldmind_ai_core.core.application.models.indexing import (
-    SourceDocumentFolderRelationSnapshot,
-)
-from foldmind_ai_core.core.application.services.outbox_events import (
+from foldmind_ai_core.core.application.mappers.outbox_events import (
     document_deleted_event,
     document_folder_relations_indexed_event,
     document_indexed_event,
     folder_deleted_event,
     folder_indexed_event,
+    folder_signals_indexed_event,
+    folder_signals_invalidated_event,
 )
-from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
-from foldmind_ai_core.adapters.inbound.messaging.projection_events import (
-    DocumentDeletedProjectionEvent,
-    DocumentFolderRelationsIndexedProjectionEvent,
-    DocumentIndexedProjectionEvent,
-    FolderDeletedProjectionEvent,
-    FolderIndexedProjectionEvent,
-)
-from foldmind_ai_core.core.domain.models.profiling import (
+from foldmind_ai_core.core.application.models.indexing import FolderSignalInvalidation
+from foldmind_ai_core.core.application.models.vector_projection import VectorProjectionSpec
+from foldmind_ai_core.core.domain.models.document_chunks import DocumentChunk
+from foldmind_ai_core.core.domain.models.document_index_state import DocumentIndexState
+from foldmind_ai_core.core.domain.models.document_signals import (
     DocumentSignal,
+    DocumentSignalEvidence,
     DocumentSignalType,
-    DocumentProfile,
-    SignalEvidence,
 )
-from foldmind_ai_core.core.domain.models.reference.documents import SourceDocument
-from foldmind_ai_core.core.domain.models.reference.folders import SourceFolder
-from foldmind_ai_core.core.domain.services.profiling import (
-    create_document_signal,
+from foldmind_ai_core.core.domain.models.folder_signals import (
+    FolderSignal,
+    FolderSignalType,
 )
+from foldmind_ai_core.core.domain.models.document_folder_relations import (
+    SourceDocumentFolderRelationSnapshot,
+)
+from foldmind_ai_core.core.domain.models.document_sources import SourceDocument
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
+from foldmind_ai_core.core.domain.services.document_signal_service import DocumentSignalService
+from foldmind_ai_core.core.domain.services.folder_signal_service import FolderSignalService
 
-ProjectionEvent: TypeAlias = (
-    DocumentDeletedProjectionEvent
-    | DocumentFolderRelationsIndexedProjectionEvent
-    | DocumentIndexedProjectionEvent
-    | FolderDeletedProjectionEvent
-    | FolderIndexedProjectionEvent
-    | DeleteDocumentProjectionCommand
+ProjectionCommand: TypeAlias = (
+    DeleteDocumentProjectionCommand
     | DeleteFolderProjectionCommand
+    | InvalidateFolderSignalsCommand
     | ProjectDocumentFolderRelationsCommand
     | ProjectDocumentCommand
     | ProjectFolderCommand
+    | ProjectFolderSignalsCommand
 )
 
 
 class FakeProjectionConsumer:
     def __init__(self) -> None:
-        self.events: list[ProjectionEvent] = []
+        self.events: list[ProjectionCommand] = []
 
-    def execute(self, event: ProjectionEvent) -> None:
+    async def project_document_chunks(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def delete_document_chunks(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def project_document_vector(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def delete_document_vector(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def project_document_signals(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def delete_document_signals(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def project_folder_vector(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def delete_folder_vector(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def project_folder_signals(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def invalidate_folder_signals(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def delete_folder_signals(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def project_document_graph(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def project_document_folder_relations(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def delete_document_graph(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def project_folder_graph(self, event: ProjectionCommand) -> None:
+        self.events.append(event)
+
+    async def delete_folder_graph(self, event: ProjectionCommand) -> None:
         self.events.append(event)
 
 
-class MessagingAdapterTests(unittest.TestCase):
+class MessagingAdapterTests(unittest.IsolatedAsyncioTestCase):
     def test_outbox_domain_partition_key_uses_source_identity(self) -> None:
         event = document_deleted_event(
             tenant="tenant-1",
             document_id="doc-1",
+            source_version="v1",
         )
 
         self.assertEqual(event.partition_key, "document:tenant-1:doc-1")
 
-    def test_message_codec_decodes_event_specific_projection_events(self) -> None:
-        document_event = document_indexed_event_from_outbox(_document_indexed_event())
-        document_relations_event = document_folder_relations_indexed_event_from_outbox(
+    def test_message_codec_decodes_event_specific_projection_commands(self) -> None:
+        document_command = project_document_command_from_outbox(_document_indexed_event())
+        document_relations_command = project_document_folder_relations_command_from_outbox(
             _document_folder_relations_indexed_event()
         )
-        folder_event = folder_indexed_event_from_outbox(_folder_indexed_event())
-        document_deleted = document_deleted_event_from_outbox(
+        folder_command = project_folder_command_from_outbox(_folder_indexed_event())
+        document_deleted = delete_document_projection_command_from_outbox(
             document_deleted_event(
                 tenant="tenant-1",
                 document_id="doc-1",
+                source_version="v1",
                 affected_folder_ids=("folder-1",),
             )
         )
-        folder_deleted = folder_deleted_event_from_outbox(
-            folder_deleted_event(tenant="tenant-1", folder_id="folder-1")
+        folder_deleted = delete_folder_projection_command_from_outbox(
+            folder_deleted_event(
+                tenant="tenant-1",
+                folder_id="folder-1",
+                source_version="folder-v1",
+            )
         )
 
-        self.assertIsInstance(document_event, DocumentIndexedProjectionEvent)
+        self.assertIsInstance(document_command, ProjectDocumentCommand)
         self.assertIsInstance(
-            document_relations_event,
-            DocumentFolderRelationsIndexedProjectionEvent,
+            document_relations_command,
+            ProjectDocumentFolderRelationsCommand,
         )
-        self.assertIsInstance(folder_event, FolderIndexedProjectionEvent)
-        self.assertIsInstance(document_deleted, DocumentDeletedProjectionEvent)
+        self.assertIsInstance(folder_command, ProjectFolderCommand)
+        self.assertIsInstance(document_deleted, DeleteDocumentProjectionCommand)
         self.assertEqual(document_deleted.affected_folder_ids, ("folder-1",))
-        self.assertIsInstance(folder_deleted, FolderDeletedProjectionEvent)
+        self.assertEqual(document_deleted.tenant, "tenant-1")
+        self.assertIsInstance(folder_deleted, DeleteFolderProjectionCommand)
+        self.assertEqual(folder_deleted.tenant, "tenant-1")
 
     def test_message_codec_accepts_missing_document_type(self) -> None:
         event = _document_indexed_event()
@@ -134,10 +197,9 @@ class MessagingAdapterTests(unittest.TestCase):
         payload["chunks"][0].pop("document_type")
         payload["signals"][0]["document_type"] = None
 
-        decoded = document_indexed_event_from_outbox(replace(event, payload=payload))
+        decoded = project_document_command_from_outbox(replace(event, payload=payload))
 
         self.assertIsNone(decoded.document.document_type)
-        self.assertIsNone(decoded.profile.document_type)
         self.assertIsNone(decoded.chunks[0].document_type)
         self.assertIsNone(decoded.signals[0].document_type)
 
@@ -218,7 +280,7 @@ class MessagingAdapterTests(unittest.TestCase):
         payload["folder_relation_snapshot"] = relation_snapshot
 
         with self.assertRaises(ValueError):
-            document_folder_relations_indexed_event_from_outbox(
+            project_document_folder_relations_command_from_outbox(
                 replace(event, payload=payload)
             )
 
@@ -232,7 +294,7 @@ class MessagingAdapterTests(unittest.TestCase):
         concept_payload["signals"] = signals
 
         with self.assertRaises(ValueError):
-            document_indexed_event_from_outbox(replace(event, payload=concept_payload))
+            project_document_command_from_outbox(replace(event, payload=concept_payload))
 
     def test_message_codec_rejects_blank_projection_relationship_ids(self) -> None:
         event = _document_folder_relations_indexed_event()
@@ -242,7 +304,7 @@ class MessagingAdapterTests(unittest.TestCase):
         payload["folder_relation_snapshot"] = relation_snapshot
 
         with self.assertRaises(ValueError):
-            document_folder_relations_indexed_event_from_outbox(
+            project_document_folder_relations_command_from_outbox(
                 replace(event, payload=payload)
             )
 
@@ -253,7 +315,7 @@ class MessagingAdapterTests(unittest.TestCase):
         payload = dict(event.payload)
         payload["folder_relation_snapshot"] = relation_snapshot
 
-        projection_event = document_folder_relations_indexed_event_from_outbox(
+        projection_event = project_document_folder_relations_command_from_outbox(
             replace(event, payload=payload)
         )
 
@@ -266,8 +328,8 @@ class MessagingAdapterTests(unittest.TestCase):
         event = _document_indexed_event()
         source_document = dict(event.payload["source_document"])
         source_document["document_id"] = " doc-1 "
-        profile = dict(event.payload["profile"])
-        profile["document_id"] = " doc-1 "
+        document_index_payload = dict(event.payload["profile"])
+        document_index_payload["document_id"] = " doc-1 "
         signals = list(event.payload["signals"])
         signal = dict(signals[0])
         signal["signal_id"] = " signal-1 "
@@ -277,16 +339,16 @@ class MessagingAdapterTests(unittest.TestCase):
         chunks[0]["chunk_id"] = " chunk-1 "
         payload = dict(event.payload)
         payload["source_document"] = source_document
-        payload["profile"] = profile
+        payload["profile"] = document_index_payload
         payload["signals"] = signals
         payload["chunks"] = chunks
 
-        projection_event = document_indexed_event_from_outbox(
+        projection_event = project_document_command_from_outbox(
             replace(event, payload=payload)
         )
 
         self.assertEqual(projection_event.document.document_id, "doc-1")
-        self.assertEqual(projection_event.profile.document_id, "doc-1")
+        self.assertEqual(projection_event.document_index.document_id, "doc-1")
         self.assertEqual(projection_event.chunks[0].document_id, "doc-1")
         self.assertEqual(projection_event.chunks[0].chunk_id, "chunk-1")
         self.assertEqual(projection_event.signals[0].signal_id, "signal-1")
@@ -309,7 +371,7 @@ class MessagingAdapterTests(unittest.TestCase):
         }
 
         event = outbox_event_from_flattened_payload(payload)
-        projection_event = document_deleted_event_from_outbox(event)
+        projection_event = delete_document_projection_command_from_outbox(event)
 
         self.assertEqual(event.source_id, "doc-1")
         self.assertEqual(event.tenant, "tenant-1")
@@ -327,7 +389,7 @@ class MessagingAdapterTests(unittest.TestCase):
         payload = dict(event.payload)
         payload["source_folder"] = source_folder
 
-        projection_event = folder_indexed_event_from_outbox(
+        projection_event = project_folder_command_from_outbox(
             replace(event, payload=payload)
         )
 
@@ -345,7 +407,7 @@ class MessagingAdapterTests(unittest.TestCase):
         payload = dict(event.payload)
         payload["chunks"] = chunks
 
-        projection_event = document_indexed_event_from_outbox(
+        projection_event = project_document_command_from_outbox(
             replace(event, payload=payload)
         )
 
@@ -355,34 +417,35 @@ class MessagingAdapterTests(unittest.TestCase):
 
     def test_message_codec_rejects_mismatched_document_projection_identity(self) -> None:
         event = _document_indexed_event()
-        profile = dict(event.payload["profile"])
-        profile["document_id"] = "doc-other"
+        document_index_payload = dict(event.payload["profile"])
+        document_index_payload["document_id"] = "doc-other"
         payload = dict(event.payload)
-        payload["profile"] = profile
+        payload["profile"] = document_index_payload
 
         with self.assertRaises(ValueError):
-            document_indexed_event_from_outbox(replace(event, payload=payload))
+            project_document_command_from_outbox(replace(event, payload=payload))
 
     def test_message_codec_rejects_mismatched_source_identity(self) -> None:
         with self.assertRaises(ValueError):
-            document_deleted_event_from_outbox(
+            delete_document_projection_command_from_outbox(
                 replace(
                     document_deleted_event(
                         tenant="tenant-1",
                         document_id="doc-1",
+                        source_version="v1",
                     ),
                     source_id="doc-other",
                 )
             )
 
         with self.assertRaises(ValueError):
-            folder_indexed_event_from_outbox(
+            project_folder_command_from_outbox(
                 replace(_folder_indexed_event(), source_id="folder-other")
             )
 
     def test_message_codec_rejects_mismatched_source_kind(self) -> None:
         with self.assertRaises(ValueError):
-            document_indexed_event_from_outbox(
+            project_document_command_from_outbox(
                 replace(_document_indexed_event(), source_kind="folder")
             )
 
@@ -394,7 +457,7 @@ class MessagingAdapterTests(unittest.TestCase):
         payload["source_folder"] = source_folder
 
         with self.assertRaises(ValueError):
-            folder_indexed_event_from_outbox(replace(event, payload=payload))
+            project_folder_command_from_outbox(replace(event, payload=payload))
 
     def test_message_codec_rejects_malformed_flattened_envelope_types(self) -> None:
         payload = {
@@ -416,86 +479,177 @@ class MessagingAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             outbox_event_from_flattened_payload(payload)
 
-    def test_projection_target_consumers_call_their_use_cases(self) -> None:
-        document_indexed = FakeProjectionConsumer()
+    async def test_projection_target_consumers_call_their_application_services(self) -> None:
+        document_vector_indexed = FakeProjectionConsumer()
+        document_signal_indexed = FakeProjectionConsumer()
         document_folder_relations_indexed = FakeProjectionConsumer()
-        document_deleted = FakeProjectionConsumer()
-        folder_indexed = FakeProjectionConsumer()
-        folder_deleted = FakeProjectionConsumer()
+        document_chunk_deleted = FakeProjectionConsumer()
+        document_signal_deleted = FakeProjectionConsumer()
+        folder_vector_indexed = FakeProjectionConsumer()
+        folder_signal_indexed = FakeProjectionConsumer()
+        folder_signal_invalidated = FakeProjectionConsumer()
+        folder_signal_deleted = FakeProjectionConsumer()
+        folder_graph_deleted = FakeProjectionConsumer()
+        folder_signal_graph_indexed = FakeProjectionConsumer()
+        folder_signal_graph_invalidated = FakeProjectionConsumer()
 
-        DocumentVectorIndexedConsumer(
-            use_case=document_indexed,
+        await DocumentVectorIndexedConsumer(
+            service=document_vector_indexed,
         ).consume_outbox_event(_document_indexed_event())
-        DocumentGraphFolderRelationsIndexedConsumer(
-            use_case=document_folder_relations_indexed,
+        await DocumentSignalVectorsIndexedConsumer(
+            service=document_signal_indexed,
+        ).consume_outbox_event(_document_indexed_event())
+        await DocumentGraphFolderRelationsIndexedConsumer(
+            service=document_folder_relations_indexed,
         ).consume_outbox_event(_document_folder_relations_indexed_event())
-        DocumentChunkVectorDeletedConsumer(
-            use_case=document_deleted,
+        await DocumentChunkVectorDeletedConsumer(
+            service=document_chunk_deleted,
         ).consume_outbox_event(
             document_deleted_event(
                 tenant="tenant-1",
                 document_id="doc-1",
+                source_version="v1",
                 affected_folder_ids=("folder-1",),
             )
         )
-        FolderVectorIndexedConsumer(
-            use_case=folder_indexed,
-        ).consume_outbox_event(_folder_indexed_event())
-        FolderGraphDeletedConsumer(
-            use_case=folder_deleted,
+        await DocumentSignalVectorsDeletedConsumer(
+            service=document_signal_deleted,
         ).consume_outbox_event(
-            folder_deleted_event(tenant="tenant-1", folder_id="folder-1")
+            document_deleted_event(
+                tenant="tenant-1",
+                document_id="doc-1",
+                source_version="v1",
+                affected_folder_ids=("folder-1",),
+            )
+        )
+        await FolderVectorIndexedConsumer(
+            service=folder_vector_indexed,
+        ).consume_outbox_event(_folder_indexed_event())
+        await FolderSignalVectorsIndexedConsumer(
+            service=folder_signal_indexed,
+        ).consume_outbox_event(_folder_signals_indexed_event())
+        await FolderSignalVectorsInvalidatedConsumer(
+            service=folder_signal_invalidated,
+        ).consume_outbox_event(_folder_signals_invalidated_event())
+        await FolderSignalVectorsDeletedConsumer(
+            service=folder_signal_deleted,
+        ).consume_outbox_event(
+            folder_deleted_event(
+                tenant="tenant-1",
+                folder_id="folder-1",
+                source_version="folder-v1",
+            )
+        )
+        await FolderSignalsGraphIndexedConsumer(
+            service=folder_signal_graph_indexed,
+        ).consume_outbox_event(_folder_signals_indexed_event())
+        await FolderSignalsGraphInvalidatedConsumer(
+            service=folder_signal_graph_invalidated,
+        ).consume_outbox_event(_folder_signals_invalidated_event())
+        await FolderGraphDeletedConsumer(
+            service=folder_graph_deleted,
+        ).consume_outbox_event(
+            folder_deleted_event(
+                tenant="tenant-1",
+                folder_id="folder-1",
+                source_version="folder-v1",
+            )
         )
 
-        self.assertIsInstance(document_indexed.events[0], ProjectDocumentCommand)
+        self.assertIsInstance(document_vector_indexed.events[0], ProjectDocumentCommand)
+        self.assertIsInstance(document_signal_indexed.events[0], ProjectDocumentCommand)
         self.assertIsInstance(
             document_folder_relations_indexed.events[0],
             ProjectDocumentFolderRelationsCommand,
         )
-        self.assertIsInstance(document_deleted.events[0], DeleteDocumentProjectionCommand)
+        self.assertIsInstance(
+            document_chunk_deleted.events[0],
+            DeleteDocumentProjectionCommand,
+        )
+        self.assertEqual(document_chunk_deleted.events[0].tenant, "tenant-1")
         self.assertEqual(
-            document_deleted.events[0].affected_folder_ids,
+            document_chunk_deleted.events[0].affected_folder_ids,
             ("folder-1",),
         )
-        self.assertIsInstance(folder_indexed.events[0], ProjectFolderCommand)
-        self.assertIsInstance(folder_deleted.events[0], DeleteFolderProjectionCommand)
+        self.assertIsInstance(
+            document_signal_deleted.events[0],
+            DeleteDocumentProjectionCommand,
+        )
+        self.assertIsInstance(folder_vector_indexed.events[0], ProjectFolderCommand)
+        self.assertIsInstance(
+            folder_signal_indexed.events[0],
+            ProjectFolderSignalsCommand,
+        )
+        self.assertIsInstance(
+            folder_signal_invalidated.events[0],
+            InvalidateFolderSignalsCommand,
+        )
+        self.assertIsInstance(
+            folder_signal_deleted.events[0],
+            DeleteFolderProjectionCommand,
+        )
+        self.assertEqual(folder_signal_deleted.events[0].tenant, "tenant-1")
+        self.assertIsInstance(folder_graph_deleted.events[0], DeleteFolderProjectionCommand)
+        self.assertIsInstance(
+            folder_signal_graph_indexed.events[0],
+            ProjectFolderSignalsCommand,
+        )
+        self.assertIsInstance(
+            folder_signal_graph_invalidated.events[0],
+            InvalidateFolderSignalsCommand,
+        )
 
-    def test_dispatcher_routes_by_outbox_event_type(self) -> None:
+    async def test_dispatcher_routes_by_outbox_event_type(self) -> None:
         document_indexed = FakeProjectionConsumer()
         document_folder_relations_indexed = FakeProjectionConsumer()
         document_deleted = FakeProjectionConsumer()
         folder_indexed = FakeProjectionConsumer()
+        folder_signals_indexed = FakeProjectionConsumer()
+        folder_signals_invalidated = FakeProjectionConsumer()
         folder_deleted = FakeProjectionConsumer()
         dispatcher = OutboxEventDispatcher(
             document_indexed=DocumentGraphIndexedConsumer(
-                use_case=document_indexed,
+                service=document_indexed,
             ),
             document_folder_relations_indexed=DocumentGraphFolderRelationsIndexedConsumer(
-                use_case=document_folder_relations_indexed,
+                service=document_folder_relations_indexed,
             ),
             document_deleted=DocumentGraphDeletedConsumer(
-                use_case=document_deleted,
+                service=document_deleted,
             ),
             folder_indexed=FolderGraphIndexedConsumer(
-                use_case=folder_indexed,
+                service=folder_indexed,
+            ),
+            folder_signals_indexed=FolderSignalsGraphIndexedConsumer(
+                service=folder_signals_indexed,
+            ),
+            folder_signals_invalidated=FolderSignalsGraphInvalidatedConsumer(
+                service=folder_signals_invalidated,
             ),
             folder_deleted=FolderGraphDeletedConsumer(
-                use_case=folder_deleted,
+                service=folder_deleted,
             ),
         )
 
-        dispatcher.consume_outbox_event(_document_indexed_event())
-        dispatcher.consume_outbox_event(_document_folder_relations_indexed_event())
-        dispatcher.consume_outbox_event(_folder_indexed_event())
-        dispatcher.consume_outbox_event(
+        await dispatcher.consume_outbox_event(_document_indexed_event())
+        await dispatcher.consume_outbox_event(_document_folder_relations_indexed_event())
+        await dispatcher.consume_outbox_event(_folder_indexed_event())
+        await dispatcher.consume_outbox_event(_folder_signals_indexed_event())
+        await dispatcher.consume_outbox_event(_folder_signals_invalidated_event())
+        await dispatcher.consume_outbox_event(
             document_deleted_event(
                 tenant="tenant-1",
                 document_id="doc-1",
+                source_version="v1",
                 affected_folder_ids=("folder-1",),
             )
         )
-        dispatcher.consume_outbox_event(
-            folder_deleted_event(tenant="tenant-1", folder_id="folder-1")
+        await dispatcher.consume_outbox_event(
+            folder_deleted_event(
+                tenant="tenant-1",
+                folder_id="folder-1",
+                source_version="folder-v1",
+            )
         )
 
         self.assertIsInstance(document_indexed.events[0], ProjectDocumentCommand)
@@ -505,26 +659,40 @@ class MessagingAdapterTests(unittest.TestCase):
         )
         self.assertIsInstance(folder_indexed.events[0], ProjectFolderCommand)
         self.assertIsInstance(document_deleted.events[0], DeleteDocumentProjectionCommand)
+        self.assertEqual(document_deleted.events[0].tenant, "tenant-1")
         self.assertEqual(
             document_deleted.events[0].affected_folder_ids,
             ("folder-1",),
         )
+        self.assertIsInstance(
+            folder_signals_indexed.events[0],
+            ProjectFolderSignalsCommand,
+        )
+        self.assertIsInstance(
+            folder_signals_invalidated.events[0],
+            InvalidateFolderSignalsCommand,
+        )
         self.assertIsInstance(folder_deleted.events[0], DeleteFolderProjectionCommand)
+        self.assertEqual(folder_deleted.events[0].tenant, "tenant-1")
 
-    def test_dispatcher_skips_unconfigured_projection_targets(self) -> None:
+    async def test_dispatcher_skips_unconfigured_projection_targets(self) -> None:
         document_indexed = FakeProjectionConsumer()
         dispatcher = OutboxEventDispatcher(
             document_indexed=DocumentGraphIndexedConsumer(
-                use_case=document_indexed,
+                service=document_indexed,
             ),
             document_deleted=None,
             folder_indexed=None,
             folder_deleted=None,
         )
 
-        dispatcher.consume_outbox_event(_document_indexed_event())
-        dispatcher.consume_outbox_event(
-            folder_deleted_event(tenant="tenant-1", folder_id="folder-1")
+        await dispatcher.consume_outbox_event(_document_indexed_event())
+        await dispatcher.consume_outbox_event(
+            folder_deleted_event(
+                tenant="tenant-1",
+                folder_id="folder-1",
+                source_version="folder-v1",
+            )
         )
 
         self.assertEqual(len(document_indexed.events), 1)
@@ -543,9 +711,7 @@ class MessagingAdapterTests(unittest.TestCase):
             config["transforms.outbox.route.topic.replacement"],
             "indexing-events",
         )
-        additional_fields = config[
-            "transforms.outbox.table.fields.additional.placement"
-        ]
+        additional_fields = config["transforms.outbox.table.fields.additional.placement"]
         self.assertIn("event_sequence:envelope", additional_fields)
         self.assertIn("partition_key:envelope", additional_fields)
         self.assertIn("tenant_id:envelope", additional_fields)
@@ -576,31 +742,26 @@ def _document_indexed_event():
         updated_at=document.updated_at,
         chunk_id="chunk-1",
         chunk_index=0,
-        chunking_version="chunking-test-v1",
         text="chunk text",
-        text_hash="hash-1",
         start_offset=0,
         end_offset=10,
-        embedding_model="embedding",
-        embedding_version="embedding-v1",
-        index_schema_version="schema-v1",
     )
-    profile = DocumentProfile(
-        tenant=document.tenant,
-        document_type=document.document_type,
+    index_record = DocumentIndexState(
         document_id=document.document_id,
-        source_version=document.source_version,
-        created_at=document.created_at,
-        updated_at=document.updated_at,
-        title=document.title,
         document_index_input_digest=chunk.document_index_input_digest,
         document_signal_input_digest=chunk.document_index_input_digest,
     )
     return document_indexed_event(
         document=document,
         chunks=(chunk,),
-        profile=profile,
+        index_record=index_record,
         signals=(_summary_signal(document=document, chunk=chunk),),
+        vector_projection_spec=VectorProjectionSpec(
+            embedding_model="embedding",
+            embedding_version="embedding-v1",
+            index_schema_version="schema-v1",
+        ),
+        chunking_version="chunking-test-v1",
     )
 
 
@@ -620,7 +781,7 @@ def _summary_signal(
     document: SourceDocument,
     chunk: DocumentChunk,
 ) -> DocumentSignal:
-    return create_document_signal(
+    return DocumentSignalService().create(
         tenant=document.tenant,
         document_type=document.document_type,
         document_id=document.document_id,
@@ -629,7 +790,7 @@ def _summary_signal(
         signal_type=DocumentSignalType.SUMMARY,
         text="Summary",
         attributes={},
-        evidence=(SignalEvidence(chunk_id=chunk.chunk_id, quote=chunk.text),),
+        evidence=(DocumentSignalEvidence(chunk_id=chunk.chunk_id, quote=chunk.text),),
         confidence=0.8,
         extractor_name="test",
         extractor_version="v1",
@@ -637,17 +798,60 @@ def _summary_signal(
 
 
 def _folder_indexed_event():
-    return folder_indexed_event(
-        folder=SourceFolder(
+    return folder_indexed_event(folder=_source_folder())
+
+
+def _folder_signals_indexed_event():
+    folder = _source_folder()
+    return folder_signals_indexed_event(
+        folder=folder,
+        folder_signal_input_digest="folder-signal-input-v1",
+        signal_generation_version="folder-signals-v1",
+        signals=(_folder_signal(folder),),
+    )
+
+
+def _folder_signals_invalidated_event():
+    return folder_signals_invalidated_event(
+        FolderSignalInvalidation(
             tenant="tenant-1",
             folder_id="folder-1",
-            source_version="folder-v1",
-            created_at="2026-05-01T10:00:00+09:00",
-            updated_at="2026-05-02T11:00:00+09:00",
-            name="Startup",
-            parent_folder_id="root",
+            folder_signal_input_digest="folder-signal-input-v1",
+            signal_generation_version="folder-signals-v1",
         )
     )
+
+
+def _source_folder() -> SourceFolder:
+    return SourceFolder(
+        tenant="tenant-1",
+        folder_id="folder-1",
+        source_version="folder-v1",
+        created_at="2026-05-01T10:00:00+09:00",
+        updated_at="2026-05-02T11:00:00+09:00",
+        name="Startup",
+        parent_folder_id="root",
+    )
+
+
+def _folder_signal(folder: SourceFolder) -> FolderSignal:
+    return FolderSignalService().create(
+        tenant=folder.tenant,
+        folder_id=folder.folder_id,
+        source_version=folder.source_version,
+        folder_signal_input_digest="folder-signal-input-v1",
+        signal_generation_version="folder-signals-v1",
+        signal_type=FolderSignalType.RESPONSIBILITY,
+        signal_key="startup",
+        text="Owns startup notes.",
+        related_document_id="doc-1",
+        attributes={},
+        evidence=({"document_id": "doc-1", "quote": "chunk text"},),
+        confidence=0.7,
+        extractor_name="test",
+        extractor_version="v1",
+    )
+
 
 if __name__ == "__main__":
     unittest.main()

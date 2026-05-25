@@ -10,13 +10,15 @@ from foldmind_ai_core.adapters.outbound.qdrant.mappers import (
     payload_from_point,
     score_from_point,
 )
-from foldmind_ai_core.core.application.projections.vector import DocumentVectorProjection
-from foldmind_ai_core.core.application.ports.outbound.vector_store import VectorWriteResult
-from foldmind_ai_core.core.application.queries.retrieval import SearchScope
-from foldmind_ai_core.core.application.queries.scope_matching import (
+from foldmind_ai_core.core.application.models.vector_projection import (
+    DocumentVectorProjection,
+    VectorWriteResult,
+)
+from foldmind_ai_core.core.application.models.search import SearchScope
+from foldmind_ai_core.core.application.models.retrieval import DocumentRetrievalResult
+from foldmind_ai_core.core.application.search_scope import (
     sort_by_timestamp_scope,
 )
-from foldmind_ai_core.core.domain.models.retrieval.results import DocumentRetrievalResult
 from foldmind_ai_core.shared.canonical_json import json_digest
 from foldmind_ai_core.shared.internal_ids import stable_internal_id
 from foldmind_ai_core.shared.types import Vector
@@ -40,11 +42,15 @@ class QdrantDocumentVectorStore:
             point_id=stable_internal_id(
                 self.client.collection_name,
                 "document",
+                projection.tenant,
                 projection.document_id,
                 projection.vector_input_digest,
             ),
         )
-        self.delete_document_vector(document_id=projection.document_id)
+        self.delete_document_vector(
+            tenant=projection.tenant,
+            document_id=projection.document_id,
+        )
         self.client.upsert_points([point])
         return VectorWriteResult(
             collection_name=self.client.collection_name,
@@ -55,10 +61,12 @@ class QdrantDocumentVectorStore:
     def delete_document_vector(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         self.client.delete_by_filter(
             self.client.filter(
+                tenant=tenant,
                 document_id=document_id,
             )
         )

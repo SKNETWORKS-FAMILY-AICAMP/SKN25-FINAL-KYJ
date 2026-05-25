@@ -47,8 +47,8 @@ CREATE TABLE tasks (
     error_json jsonb CHECK (
         error_json IS NULL OR jsonb_typeof(error_json) = 'object'
     ),
-    metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
-        jsonb_typeof(metadata) = 'object'
+    metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
+        jsonb_typeof(metadata_json) = 'object'
     ),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -56,10 +56,6 @@ CREATE TABLE tasks (
     CHECK (
         (result_type IS NULL AND result_json IS NULL)
         OR (result_type IS NOT NULL AND result_json IS NOT NULL)
-    ),
-    CHECK (
-        completed_at IS NULL
-        OR status IN ('completed', 'failed', 'rejected')
     )
 );
 
@@ -110,8 +106,8 @@ CREATE TABLE task_jobs (
     error_json jsonb CHECK (
         error_json IS NULL OR jsonb_typeof(error_json) = 'object'
     ),
-    metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
-        jsonb_typeof(metadata) = 'object'
+    metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
+        jsonb_typeof(metadata_json) = 'object'
     ),
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (task_id, job_id),
@@ -163,8 +159,8 @@ CREATE TABLE task_job_results (
     summary_json jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
         jsonb_typeof(summary_json) = 'object'
     ),
-    metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
-        jsonb_typeof(metadata) = 'object'
+    metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (
+        jsonb_typeof(metadata_json) = 'object'
     ),
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (job_id, position),

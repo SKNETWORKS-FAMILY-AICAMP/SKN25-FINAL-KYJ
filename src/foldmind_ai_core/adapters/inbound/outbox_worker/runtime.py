@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import inspect
 import json
 import logging
 import math
@@ -8,6 +10,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol, cast
+
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from foldmind_ai_core.adapters.inbound.messaging.broker import (
     BrokerConsumer,
@@ -17,7 +27,8 @@ from foldmind_ai_core.adapters.inbound.messaging.dispatcher import OutboxEventCo
 from foldmind_ai_core.adapters.inbound.messaging.message_codec import (
     outbox_event_from_flattened_payload,
 )
-from foldmind_ai_core.core.domain.models.indexing.outbox import OutboxEvent
+from foldmind_ai_core.core.application.errors import ApplicationServiceError
+from foldmind_ai_core.core.domain.models.outbox import OutboxEvent
 from foldmind_ai_core.shared.types import JsonObject, JsonValue
 
 logger = logging.getLogger(__name__)
@@ -68,46 +79,83 @@ class OutboxProjectionMessageConsumer:
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
     sleep: Callable[[float], None] | None = None
 
-    def process(self, message: BrokerMessage, consumer: BrokerConsumer) -> None:
-        for attempt_index in range(self.retry_policy.max_retries + 1):
-            try:
-                event = outbox_event_from_flattened_payload(message.value)
-                self.dispatcher.consume_outbox_event(event)
-                consumer.commit(message)
-                return
-            except Exception as exc:
-                if attempt_index >= self.retry_policy.max_retries:
-                    self.dead_letter_producer.publish(
-                        topic=self.dead_letter_topic,
-                        key=_message_key(message),
-                        value=_dead_letter_payload(
-                            message,
-                            exc,
-                            attempts=self.retry_policy.max_retries + 1,
-                            projection_target=self.projection_target,
-                        ),
-                        headers=message.headers,
-                    )
+    async def process(self, message: BrokerMessage, consumer: BrokerConsumer) -> None:
+        try:
+            event = outbox_event_from_flattened_payload(message.value)
+        except Exception as exc:
+            self._dead_letter(message=message, consumer=consumer, error=exc, attempts=1)
+            return
+
+        attempts = 0
+        try:
+            async for attempt in AsyncRetrying(
+                retry=retry_if_exception(_should_retry_projection_error),
+                stop=stop_after_attempt(self.retry_policy.max_retries + 1),
+                wait=wait_exponential(
+                    multiplier=self.retry_policy.backoff_seconds,
+                    min=self.retry_policy.backoff_seconds,
+                ),
+                before_sleep=self._log_retry,
+                sleep=self._sleep,
+                reraise=True,
+            ):
+                with attempt:
+                    attempts = attempt.retry_state.attempt_number
+                    await self.dispatcher.consume_outbox_event(event)
                     consumer.commit(message)
                     return
-                delay = self.retry_policy.delay_for_retry(attempt_index + 1)
-                logger.warning(
-                    "Outbox projection failed; retrying.",
-                    extra={
-                        "attempt": attempt_index + 1,
-                        "delay_seconds": delay,
-                        "topic": message.topic,
-                        "partition": message.partition,
-                        "offset": message.offset,
-                    },
-                    exc_info=True,
-                )
-                if self.sleep is not None:
-                    self.sleep(delay)
-                elif delay > 0:
-                    import time
+        except Exception as exc:
+            self._dead_letter(
+                message=message,
+                consumer=consumer,
+                error=exc,
+                attempts=max(attempts, 1),
+            )
 
-                    time.sleep(delay)
+    def _dead_letter(
+        self,
+        *,
+        message: BrokerMessage,
+        consumer: BrokerConsumer,
+        error: Exception,
+        attempts: int,
+    ) -> None:
+        self.dead_letter_producer.publish(
+            topic=self.dead_letter_topic,
+            key=_message_key(message),
+            value=_dead_letter_payload(
+                message,
+                error,
+                attempts=attempts,
+                projection_target=self.projection_target,
+            ),
+            headers=message.headers,
+        )
+        consumer.commit(message)
+
+    def _log_retry(self, retry_state: RetryCallState) -> None:
+        if retry_state.outcome is None:
+            return
+        error = retry_state.outcome.exception()
+        if error is None:
+            return
+        logger.warning(
+            "Outbox projection failed; retrying.",
+            extra={
+                "attempt": retry_state.attempt_number,
+                "delay_seconds": retry_state.next_action.sleep
+                if retry_state.next_action is not None
+                else 0,
+            },
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+    async def _sleep(self, delay: float) -> None:
+        if self.sleep is not None:
+            self.sleep(delay)
+            return
+        if delay > 0:
+            await asyncio.sleep(delay)
 
 
 @dataclass(slots=True)
@@ -115,24 +163,41 @@ class OutboxWorkerRuntime:
     consumer: BrokerConsumer
     message_consumer: OutboxProjectionMessageConsumer
     poll_timeout_seconds: float = 1.0
+    shutdown_callbacks: tuple[Callable[[], object], ...] = ()
 
-    def run_once(self) -> bool:
+    async def run_once(self) -> bool:
         message = self.consumer.poll(self.poll_timeout_seconds)
         if message is None:
             return False
-        self.message_consumer.process(message, self.consumer)
+        await self.message_consumer.process(message, self.consumer)
         return True
 
-    def run_forever(self) -> None:
+    async def run_forever(self) -> None:
         try:
             while True:
-                self.run_once()
+                await self.run_once()
         finally:
-            self.close()
+            await self.aclose()
 
     def close(self) -> None:
-        self.message_consumer.dead_letter_producer.close()
-        self.consumer.close()
+        try:
+            self.message_consumer.dead_letter_producer.close()
+        except Exception:
+            logger.exception("Failed to close outbox dead-letter producer.")
+        try:
+            self.consumer.close()
+        except Exception:
+            logger.exception("Failed to close outbox consumer.")
+
+    async def aclose(self) -> None:
+        self.close()
+        for callback in self.shutdown_callbacks:
+            try:
+                result = callback()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                logger.exception("Failed to run outbox shutdown callback.")
 
 
 def _message_key(message: BrokerMessage) -> bytes | str | None:
@@ -143,6 +208,10 @@ def _message_key(message: BrokerMessage) -> bytes | str | None:
     except Exception:
         return None
     return event.partition_key
+
+
+def _should_retry_projection_error(error: BaseException) -> bool:
+    return not isinstance(error, ApplicationServiceError)
 
 
 def _dead_letter_payload(

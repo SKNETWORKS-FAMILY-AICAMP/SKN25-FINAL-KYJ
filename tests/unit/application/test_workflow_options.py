@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime
 
+from foldmind_ai_core.core.application.models.search import RequestContext
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
+from foldmind_ai_core.core.application.workflows.option_values import (
+    bool_option,
+    instruction_option,
+    string_tuple,
+)
 from foldmind_ai_core.core.application.workflows.plan_compiler import WorkflowPlanCompiler
 from foldmind_ai_core.core.application.workflows.plan_factory import (
     workflow_plan_from_mapping,
@@ -13,18 +21,12 @@ from foldmind_ai_core.core.application.workflows.state.plan import (
     WorkflowRiskLevel,
 )
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.application.workflows.option_values import (
-    bool_option,
-    instruction_option,
-    string_tuple,
-)
 from foldmind_ai_core.core.application.workflows.steps.options import (
     document_from_task,
     requested_host_actions,
 )
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery, RequestContext
-from foldmind_ai_core.core.domain.models.workflow.actions import HostActionType
-from foldmind_ai_core.core.domain.models.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.host_actions import HostActionType
+from foldmind_ai_core.core.domain.models.tasks import (
     TaskAnalysis,
     TaskContext,
     TaskSnapshot,
@@ -44,7 +46,9 @@ class WorkflowOptionTests(unittest.TestCase):
             bool_option({"enabled": 1}, "enabled")
 
     def test_instruction_option_requires_non_blank_string(self) -> None:
-        self.assertEqual(instruction_option({"instruction": " Summarize this. "}), "Summarize this.")
+        self.assertEqual(
+            instruction_option({"instruction": " Summarize this. "}), "Summarize this."
+        )
 
         with self.assertRaises(ValueError):
             instruction_option({})
@@ -209,8 +213,10 @@ class WorkflowOptionTests(unittest.TestCase):
         assert step_query is not None
         self.assertIsNotNone(step_query.scope)
         assert step_query.scope is not None
-        self.assertEqual(step_query.scope.created_at.gte, "2026-05-16T00:00:00+09:00")
-        self.assertEqual(step_query.scope.created_at.lt, "2026-05-17T00:00:00+09:00")
+        self.assertEqual(
+            step_query.scope.created_at,
+            datetime.fromisoformat("2026-05-16T00:00:00+09:00"),
+        )
         self.assertEqual(step_query.scope.sort.field, "created_at")
         self.assertEqual(step_query.scope.sort.direction, "desc")
 
@@ -425,7 +431,9 @@ class WorkflowOptionTests(unittest.TestCase):
         )
         query = RetrievalQuery(
             text="Recommend a folder.",
-            request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"),
+            request_context=RequestContext(
+                tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+            ),
         )
 
         document = document_from_task(
@@ -459,7 +467,9 @@ class WorkflowOptionTests(unittest.TestCase):
         )
         query = RetrievalQuery(
             text="Recommend a folder.",
-            request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"),
+            request_context=RequestContext(
+                tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+            ),
         )
 
         with self.assertRaises(TypeError):
@@ -485,7 +495,9 @@ class WorkflowOptionTests(unittest.TestCase):
         )
         query = RetrievalQuery(
             text="Recommend a folder.",
-            request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"),
+            request_context=RequestContext(
+                tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+            ),
         )
 
         document = document_from_task(

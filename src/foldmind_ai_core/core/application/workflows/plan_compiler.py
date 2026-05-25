@@ -4,11 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import cast
 
-from foldmind_ai_core.core.application.queries.retrieval import (
-    RetrievalQuery,
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
+from foldmind_ai_core.core.application.models.search import (
     SearchScope,
     SearchSort,
-    TimestampRange,
 )
 from foldmind_ai_core.core.application.workflows.state.execution import (
     WorkflowExecutionPlan,
@@ -112,7 +111,6 @@ def _query_with_source_scope(
         text=query.text,
         request_context=query.request_context,
         scope=scope,
-        anchor=query.anchor,
     )
 
 
@@ -202,12 +200,11 @@ def _query_with_temporal_scope(
         return query
     if not isinstance(raw_temporal, dict):
         raise ValueError("temporal params must be a JSON object.")
-    scope = _merge_temporal_scope(query.scope, cast(JsonObject, raw_temporal), query)
+    scope = _merge_temporal_scope(query.scope, raw_temporal, query)
     return RetrievalQuery(
         text=query.text,
         request_context=query.request_context,
         scope=scope,
-        anchor=query.anchor,
     )
 
 
@@ -217,9 +214,10 @@ def _merge_temporal_scope(
     query: RetrievalQuery,
 ) -> SearchScope:
     field = _temporal_field(temporal.get("field"))
-    period_range = _period_range(temporal.get("period"), query.request_context.requested_at)
-    explicit_range = _explicit_range(temporal.get("range"))
-    timestamp_range = explicit_range or period_range
+    timestamp = _explicit_timestamp(temporal.get("timestamp")) or _period_timestamp(
+        temporal.get("period"),
+        query.request_context.requested_at,
+    )
     base_scope = existing or SearchScope()
     sort = _temporal_sort(field=field, value=temporal.get("sort"))
     return SearchScope(
@@ -228,12 +226,12 @@ def _merge_temporal_scope(
         document_ids=base_scope.document_ids,
         folder_ids=base_scope.folder_ids,
         created_at=(
-            timestamp_range
+            timestamp
             if field == "created_at"
             else base_scope.created_at
         ),
         updated_at=(
-            timestamp_range
+            timestamp
             if field == "updated_at"
             else base_scope.updated_at
         ),
@@ -243,41 +241,28 @@ def _merge_temporal_scope(
 
 
 def _temporal_field(value: object) -> str:
-    if value not in {"created_at", "updated_at"}:
-        raise ValueError("temporal.field must be created_at or updated_at.")
-    return cast(str, value)
+    if isinstance(value, str) and value in {"created_at", "updated_at"}:
+        return value
+    raise ValueError("temporal.field must be created_at or updated_at.")
 
 
 def _temporal_sort(*, field: str, value: object) -> SearchSort | None:
     if value is None:
         return None
-    if value not in {"asc", "desc"}:
-        raise ValueError("temporal.sort must be asc or desc.")
-    return SearchSort(field=field, direction=cast(str, value))
+    if isinstance(value, str) and value in {"asc", "desc"}:
+        return SearchSort(field=field, direction=value)
+    raise ValueError("temporal.sort must be asc or desc.")
 
 
-def _explicit_range(value: object) -> TimestampRange | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise ValueError("temporal.range must be a JSON object.")
-    return TimestampRange(
-        gt=_optional_range_value(value.get("gt"), "temporal.range.gt"),
-        gte=_optional_range_value(value.get("gte"), "temporal.range.gte"),
-        lt=_optional_range_value(value.get("lt"), "temporal.range.lt"),
-        lte=_optional_range_value(value.get("lte"), "temporal.range.lte"),
-    )
-
-
-def _optional_range_value(value: object, name: str) -> str | None:
+def _explicit_timestamp(value: object) -> datetime | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} must be a non-empty string.")
-    return value.strip()
+        raise ValueError("temporal.timestamp must be a non-empty string.")
+    return datetime.fromisoformat(value.strip())
 
 
-def _period_range(value: object, requested_at: str) -> TimestampRange | None:
+def _period_timestamp(value: object, requested_at: str) -> datetime | None:
     if value is None:
         return None
     if not isinstance(value, str):
@@ -288,36 +273,27 @@ def _period_range(value: object, requested_at: str) -> TimestampRange | None:
     match value:
         case "today":
             start = current.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = start + timedelta(days=1)
         case "yesterday":
             end = current.replace(hour=0, minute=0, second=0, microsecond=0)
             start = end - timedelta(days=1)
         case "this_week":
             start = _week_start(current)
-            end = start + timedelta(days=7)
         case "last_week":
             end = _week_start(current)
             start = end - timedelta(days=7)
         case "this_month":
             start = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            end = _next_month(start)
         case "last_month":
             end = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             start = _previous_month(end)
         case _:
             raise ValueError(f"Unsupported temporal.period: {value}.")
-    return TimestampRange(gte=start.isoformat(), lt=end.isoformat())
+    return start
 
 
 def _week_start(value: datetime) -> datetime:
     day_start = value.replace(hour=0, minute=0, second=0, microsecond=0)
     return day_start - timedelta(days=day_start.weekday())
-
-
-def _next_month(value: datetime) -> datetime:
-    if value.month == 12:
-        return value.replace(year=value.year + 1, month=1)
-    return value.replace(month=value.month + 1)
 
 
 def _previous_month(value: datetime) -> datetime:

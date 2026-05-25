@@ -3,21 +3,23 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from foldmind_ai_core.core.application.workflows.host_actions.build_context import HostActionBuildContext
+from foldmind_ai_core.core.application.workflows.host_actions.build_context import (
+    HostActionBuildContext,
+)
 from foldmind_ai_core.core.application.workflows.option_values import (
     bool_option,
     metadata_option,
     optional_text_value,
     positive_int_option,
 )
-from foldmind_ai_core.core.domain.models.generation.results import (
+from foldmind_ai_core.core.application.models.generation import (
     DocumentRecommendation,
     DraftResult,
     FolderRecommendationResult,
     GeneratedTextResult,
     RelatedRecommendationResult,
 )
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.domain.models.host_actions import (
     ActionPlan,
     CreateDocumentInput,
     CreateFolderInput,
@@ -30,7 +32,7 @@ from foldmind_ai_core.core.domain.models.workflow.actions import (
     MoveDocumentInput,
     UpdateDocumentInput,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskSnapshot
+from foldmind_ai_core.core.domain.models.tasks import TaskSnapshot
 from foldmind_ai_core.shared.internal_ids import stable_internal_id
 from foldmind_ai_core.shared.types import JsonObject, Metadata
 
@@ -388,6 +390,8 @@ class HostActionBuilder:
             return None
         target = related_recommendation.items[0].target
         if not isinstance(target, DocumentRecommendation):
+            return None
+        if target.document.document_type is None:
             return None
         return target.document.document_type, target.document.document_id
 

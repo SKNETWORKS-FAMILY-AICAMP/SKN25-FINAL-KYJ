@@ -9,15 +9,13 @@ from foldmind_ai_core.adapters.inbound.http.dtos.actions import (
     HostActionDTO,
 )
 from foldmind_ai_core.adapters.inbound.http.dtos.dto_model import APIDTO
-from foldmind_ai_core.adapters.inbound.http.dtos.retrieval import (
-    GeneratedTextResponse,
-)
 from foldmind_ai_core.adapters.inbound.http.dtos.workflow_outputs import (
     AssistantClarificationDTO,
     DocumentRecommendationResultDTO,
     DocumentSearchResultDTO,
     DraftResultDTO,
     FolderRecommendationResultDTO,
+    GeneratedTextDTO,
     RelatedRecommendationResultDTO,
 )
 
@@ -55,12 +53,12 @@ class RelatedRecommendationOutputDTO(TaskOutputMetaDTO):
 
 class AnswerOutputDTO(TaskOutputMetaDTO):
     type: Literal["answer"] = "answer"
-    result: GeneratedTextResponse
+    result: GeneratedTextDTO
 
 
 class SummaryOutputDTO(TaskOutputMetaDTO):
     type: Literal["summary"] = "summary"
-    result: GeneratedTextResponse
+    result: GeneratedTextDTO
 
 
 class DraftOutputDTO(TaskOutputMetaDTO):
@@ -70,7 +68,7 @@ class DraftOutputDTO(TaskOutputMetaDTO):
 
 class IdeasOutputDTO(TaskOutputMetaDTO):
     type: Literal["ideas"] = "ideas"
-    result: GeneratedTextResponse
+    result: GeneratedTextDTO
 
 
 class ActionPlanOutputDTO(TaskOutputMetaDTO):

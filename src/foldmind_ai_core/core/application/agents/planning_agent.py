@@ -5,21 +5,21 @@ from dataclasses import dataclass
 
 from foldmind_ai_core.core.application.agents.json_output import parse_json_object_output
 from foldmind_ai_core.core.application.models.llm import LLMMessage
-from foldmind_ai_core.core.application.ports.outbound.llm import LLMProvider
-from foldmind_ai_core.core.application.ports.outbound.prompt_store import PromptStore
-from foldmind_ai_core.core.application.services.prompts import (
+from foldmind_ai_core.core.application.ports.outbound.provider.llm import LLMProvider
+from foldmind_ai_core.core.application.ports.outbound.provider.prompt_store import PromptStore
+from foldmind_ai_core.core.application.prompts import (
     PROMPT_WORKFLOW_PLANNING,
     TOKEN_ALLOWED_WORKFLOW_ACTION_TYPES,
     render_prompt,
+)
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
+from foldmind_ai_core.core.application.workflows.plan_factory import (
+    workflow_plan_from_mapping,
 )
 from foldmind_ai_core.core.application.workflows.state.plan import (
     WorkflowActionType,
     WorkflowPlan,
 )
-from foldmind_ai_core.core.application.workflows.plan_factory import (
-    workflow_plan_from_mapping,
-)
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery
 
 
 class PlanningError(RuntimeError):
@@ -31,7 +31,7 @@ class PlanningAgent:
     prompt_store: PromptStore
     llm: LLMProvider
 
-    def plan(self, query: RetrievalQuery) -> WorkflowPlan:
+    async def plan(self, query: RetrievalQuery) -> WorkflowPlan:
         payload = {
             "request": query.text,
             "request_context": {
@@ -50,7 +50,7 @@ class PlanningAgent:
                 ),
             },
         )
-        response = self.llm.generate(
+        response = await self.llm.generate(
             [
                 LLMMessage(role="system", content=system_prompt),
                 LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False)),

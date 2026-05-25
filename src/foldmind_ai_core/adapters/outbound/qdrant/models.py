@@ -68,8 +68,8 @@ class QdrantSignalPayload:
     embedding_model: str
     embedding_version: str
     index_schema_version: str
-    extractor_name: str = ""
-    extractor_version: str = ""
+    extractor_name: str
+    extractor_version: str
     generation_model: str | None = None
     metadata: JsonObject = field(default_factory=dict)
 

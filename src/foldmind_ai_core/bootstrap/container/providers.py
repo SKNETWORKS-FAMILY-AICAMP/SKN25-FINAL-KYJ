@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from foldmind_ai_core.core.application.ports.outbound.prompt_store import PromptStore
-from foldmind_ai_core.bootstrap.container.dependencies import AICapabilities
+from foldmind_ai_core.bootstrap.container.dependencies import AIProviders
 from foldmind_ai_core.bootstrap.settings import AIProvider, APISettings
+from foldmind_ai_core.core.application.ports.outbound.provider.prompt_store import PromptStore
 
 
-def build_ai_capabilities(settings: APISettings) -> AICapabilities:
+def _build_ai_providers(settings: APISettings) -> AIProviders:
     try:
         provider = AIProvider(settings.ai_provider)
     except ValueError as exc:
@@ -33,7 +33,7 @@ def build_ai_capabilities(settings: APISettings) -> AICapabilities:
                 max_retries=settings.openai_max_retries,
             )
         )
-        return AICapabilities(
+        return AIProviders(
             llm=OpenAILLMProvider(model=settings.llm_model, client=client),
             embeddings=OpenAIEmbeddingProvider(
                 model=settings.required_embedding_model,
@@ -44,7 +44,7 @@ def build_ai_capabilities(settings: APISettings) -> AICapabilities:
     raise RuntimeError(f"Unsupported FOLDMIND_AI_PROVIDER: {settings.ai_provider}")
 
 
-def build_prompt_store(settings: APISettings) -> PromptStore:
+def _build_prompt_store(settings: APISettings) -> PromptStore:
     from foldmind_ai_core.adapters.outbound.prompt_store.file_prompt_store import (
         FilePromptStore,
     )

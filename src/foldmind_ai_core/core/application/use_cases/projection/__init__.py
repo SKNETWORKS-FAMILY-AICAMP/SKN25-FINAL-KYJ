@@ -1,1 +1,0 @@
-"""Projection use case implementations."""

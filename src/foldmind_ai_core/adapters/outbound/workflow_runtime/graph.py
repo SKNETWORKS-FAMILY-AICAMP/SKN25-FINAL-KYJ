@@ -15,18 +15,20 @@ from foldmind_ai_core.adapters.outbound.workflow_runtime.checkpoint_codec import
 )
 from foldmind_ai_core.adapters.outbound.workflow_runtime.graph_state import GraphState
 from foldmind_ai_core.adapters.outbound.workflow_runtime.nodes import LangGraphWorkflowNodes
-from foldmind_ai_core.core.application.workflows.engine import WorkflowEngine
-from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
-from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.workflow.actions import HostActionResult
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskSnapshot
+from foldmind_ai_core.core.application.ports.outbound.runtime.workflow_runtime import (
+    WorkflowActionType,
+    WorkflowExecutionEngine,
+    WorkflowState,
+)
+from foldmind_ai_core.core.domain.models.host_actions import HostActionResult
+from foldmind_ai_core.core.domain.models.tasks import TaskSnapshot
 
 GraphBuilder: TypeAlias = StateGraph[GraphState, None, GraphState, GraphState]
 
 
 @dataclass(slots=True)
 class LangGraphWorkflowGraph:
-    engine: WorkflowEngine
+    engine: WorkflowExecutionEngine
     checkpointer: Any
     _nodes: LangGraphWorkflowNodes = field(init=False, repr=False)
     _graph: Any = field(init=False, repr=False)
@@ -37,21 +39,21 @@ class LangGraphWorkflowGraph:
         self._nodes = LangGraphWorkflowNodes(self.engine)
         self._graph = self.__compile()
 
-    def run(self, snapshot: TaskSnapshot) -> TaskSnapshot:
+    async def run(self, snapshot: TaskSnapshot) -> TaskSnapshot:
         thread_config = {"configurable": {"thread_id": snapshot.task_id}}
-        result = self._graph.invoke(
+        result = await self._graph.ainvoke(
             workflow_state_to_checkpoint(WorkflowState(task=snapshot)),
             thread_config,
         )
         return workflow_state_from_checkpoint(result).task
 
-    def resume_from_action_result(
+    async def resume_from_action_result(
         self,
         *,
         task_id: str,
         result: HostActionResult,
     ) -> TaskSnapshot:
-        graph_state = self._graph.invoke(
+        graph_state = await self._graph.ainvoke(
             Command(resume=checkpoint_value(result)),
             {"configurable": {"thread_id": task_id}},
         )

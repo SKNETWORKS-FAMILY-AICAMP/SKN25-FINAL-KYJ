@@ -1,39 +1,41 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import asynccontextmanager
+from datetime import datetime
 
-from foldmind_ai_core.core.application.commands.recommendation import RecommendFolderCommand
+from foldmind_ai_core.core.application.models.recommendation import FolderRecommendationSource
 from foldmind_ai_core.core.application.errors import NoCandidatesError, ProviderContractError
-from foldmind_ai_core.core.application.projections.vector import (
+from foldmind_ai_core.core.application.models.vector_projection import (
     DocumentVectorProjection,
     FolderVectorProjection,
 )
-from foldmind_ai_core.core.application.services.folder_retrieval_ranker import (
-    FolderRetrievalRanker,
+from foldmind_ai_core.core.application.models.retrieval import FolderSearchQuery
+from foldmind_ai_core.core.application.models.search import SearchScope
+from foldmind_ai_core.core.application.services.recommendation.folder_recommendation_service import (  # noqa: E501
+    FolderRecommendationService,
 )
-from foldmind_ai_core.core.application.services.folder_retrieval_service import (
+from foldmind_ai_core.core.application.services.retrieval.folder_retrieval_service import (
     FolderRetrievalService,
 )
-from foldmind_ai_core.core.application.services.relationship_scope_resolver import (
+from foldmind_ai_core.core.application.services.retrieval.folder_search_service import (
+    FolderSearchService,
+)
+from foldmind_ai_core.core.application.services.retrieval.ranking import (
+    FolderRetrievalRanker,
+)
+from foldmind_ai_core.core.application.services.retrieval.scope_resolver import (
     RelationshipScopeResolver,
 )
-from foldmind_ai_core.core.application.use_cases.recommendation.find_folders import FindFoldersUseCase
-from foldmind_ai_core.core.application.use_cases.recommendation.recommend_folder import (
-    RecommendFolderUseCase,
-)
-from foldmind_ai_core.core.application.queries.retrieval import (
-    FolderSearchQuery,
-    SearchScope,
-)
-from foldmind_ai_core.core.application.results.retrieval import SearchFoldersResult
-from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
-from foldmind_ai_core.core.domain.models.retrieval.results import (
+from foldmind_ai_core.core.application.models.retrieval import (
     DocumentRetrievalResult,
     FolderRetrievalResult,
     RetrievalResult,
     RetrievedDocument,
-    RetrievedFolder,
 )
+from foldmind_ai_core.core.domain.models.document_chunks import DocumentChunk
+from foldmind_ai_core.core.domain.models.document_sources import SourceDocument
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
 from foldmind_ai_core.shared.types import Vector
 from foldmind_ai_core.shared.validation import InvalidInputError
 
@@ -62,7 +64,7 @@ class FakeDocumentVectorStore:
         *,
         tenant: str,
         document_id: str,
-        chunks: tuple[DocumentChunk, ...],
+        chunks: tuple[object, ...],
         vectors: tuple[Vector, ...],
     ) -> None:
         raise AssertionError("Document chunk writes are not expected in these tests.")
@@ -78,6 +80,7 @@ class FakeDocumentVectorStore:
     def delete_document_chunks(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Document chunk deletes are not expected in these tests.")
@@ -85,6 +88,7 @@ class FakeDocumentVectorStore:
     def delete_document_vector(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Document vector deletes are not expected in these tests.")
@@ -128,7 +132,7 @@ class FailingDocumentVectorStore:
         *,
         tenant: str,
         document_id: str,
-        chunks: tuple[DocumentChunk, ...],
+        chunks: tuple[object, ...],
         vectors: tuple[Vector, ...],
     ) -> None:
         raise AssertionError("Document chunk writes are not expected in these tests.")
@@ -144,6 +148,7 @@ class FailingDocumentVectorStore:
     def delete_document_chunks(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Document chunk deletes are not expected in these tests.")
@@ -151,6 +156,7 @@ class FailingDocumentVectorStore:
     def delete_document_vector(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Document vector deletes are not expected in these tests.")
@@ -189,7 +195,7 @@ class FakeFolderVectorStore:
     ) -> None:
         raise AssertionError("Folder vector writes are not expected in these tests.")
 
-    def delete_folder_vector(self, *, folder_id: str) -> None:
+    def delete_folder_vector(self, *, tenant: str, folder_id: str) -> None:
         raise AssertionError("Folder vector deletes are not expected in these tests.")
 
     def search_folders(
@@ -204,10 +210,11 @@ class FakeFolderVectorStore:
         self.scopes.append(scope)
         return [
             FolderRetrievalResult(
-                folder=RetrievedFolder(
+                folder=SourceFolder(
                     tenant=tenant,
                     folder_id="folder-b",
                     source_version="folder-v1",
+                    name="folder-b",
                     created_at="2026-05-01T10:00:00+09:00",
                     updated_at="2026-05-02T11:00:00+09:00",
                 ),
@@ -215,6 +222,76 @@ class FakeFolderVectorStore:
                 reason="Folder metadata is semantically close.",
             )
         ]
+
+
+class EmptyFolderVectorStore(FakeFolderVectorStore):
+    def search_folders(
+        self,
+        *,
+        tenant: str,
+        query_vector: Vector,
+        top_k: int,
+        scope: SearchScope | None = None,
+    ) -> list[FolderRetrievalResult]:
+        self.scope = scope
+        self.scopes.append(scope)
+        return []
+
+
+class FakeFolderSourceRepository:
+    def __init__(
+        self,
+        *,
+        name_matches: tuple[tuple[SourceFolder, float], ...] = (),
+        description_matches: tuple[tuple[SourceFolder, float], ...] = (),
+    ) -> None:
+        self.name_matches = name_matches
+        self.description_matches = description_matches
+        self.name_scopes: list[tuple[str, ...]] = []
+        self.description_scopes: list[tuple[str, ...]] = []
+
+    async def search_names_by_keyword(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        folder_ids: tuple[str, ...],
+        created_at: datetime | None,
+        updated_at: datetime | None,
+    ) -> tuple[tuple[SourceFolder, float], ...]:
+        self.name_scopes.append(folder_ids)
+        return self.name_matches[:top_k]
+
+    async def search_descriptions_by_keyword(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        folder_ids: tuple[str, ...],
+        created_at: datetime | None,
+        updated_at: datetime | None,
+    ) -> tuple[tuple[SourceFolder, float], ...]:
+        self.description_scopes.append(folder_ids)
+        return self.description_matches[:top_k]
+
+
+class FakeRetrievalReadSession:
+    def __init__(self, folder_sources: FakeFolderSourceRepository) -> None:
+        self.folder_sources = folder_sources
+
+
+class FakeRetrievalReadSessionProvider:
+    def __init__(
+        self,
+        folder_sources: FakeFolderSourceRepository | None = None,
+    ) -> None:
+        self.folder_sources = folder_sources or FakeFolderSourceRepository()
+
+    @asynccontextmanager
+    async def session(self):
+        yield FakeRetrievalReadSession(self.folder_sources)
 
 
 class FakeGraphStore:
@@ -242,19 +319,21 @@ class FakeGraphStore:
     def delete_document(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Graph document deletes are not expected in these tests.")
 
-    def delete_folder(self, *, folder_id: str) -> None:
+    def delete_folder(self, *, tenant: str, folder_id: str) -> None:
         raise AssertionError("Graph folder deletes are not expected in these tests.")
 
-    def delete_folder_signals(self, *, folder_id: str) -> None:
+    def delete_folder_signals(self, *, tenant: str, folder_id: str) -> None:
         raise AssertionError("Folder signal deletes are not expected in these tests.")
 
     def delete_stale_folder_signals(
         self,
         *,
+        tenant: str,
         folder_id: str,
         current_folder_signal_input_digest: str,
     ) -> None:
@@ -285,12 +364,15 @@ class FakeGraphStore:
         *,
         tenant: str,
         document_ids: tuple[str, ...],
-    ) -> dict[str, tuple[RetrievedFolder, ...]]:
-        def folder(folder_id: str) -> RetrievedFolder:
-            return RetrievedFolder(
+    ) -> dict[str, tuple[SourceFolder, ...]]:
+        def folder(folder_id: str) -> SourceFolder:
+            return SourceFolder(
                 tenant=tenant,
                 folder_id=folder_id,
                 source_version=f"{folder_id}-v1",
+                name=folder_id,
+                created_at="2026-05-01T10:00:00+09:00",
+                updated_at="2026-05-02T11:00:00+09:00",
             )
 
         return {
@@ -319,16 +401,16 @@ class EmptyRelationshipScopeGraphStore(FakeGraphStore):
         *,
         tenant: str,
         document_ids: tuple[str, ...],
-    ) -> dict[str, tuple[RetrievedFolder, ...]]:
+    ) -> dict[str, tuple[SourceFolder, ...]]:
         raise AssertionError("Document folder lookup should be skipped.")
 
 
 class NoFolderCandidates:
-    def execute(self, query: FolderSearchQuery) -> SearchFoldersResult:
-        return SearchFoldersResult(results=())
+    async def search(self, query: FolderSearchQuery) -> tuple[FolderRetrievalResult, ...]:
+        return ()
 
 
-class FolderRecommendationTests(unittest.TestCase):
+class FolderRecommendationTests(unittest.IsolatedAsyncioTestCase):
     def test_folder_retrieval_service_rejects_malformed_numeric_options(self) -> None:
         with self.assertRaises(InvalidInputError):
             _folder_retrieval_service(top_k=True)
@@ -341,10 +423,11 @@ class FolderRecommendationTests(unittest.TestCase):
 
     def test_folder_ranker_counts_each_document_folder_once(self) -> None:
         ranker = FolderRetrievalRanker(top_k=5)
-        folder = RetrievedFolder(
+        folder = SourceFolder(
             tenant="tenant-1",
             folder_id="folder-a",
             source_version="folder-v1",
+            name="folder-a",
             created_at="2026-05-01T10:00:00+09:00",
             updated_at="2026-05-02T11:00:00+09:00",
         )
@@ -364,17 +447,19 @@ class FolderRecommendationTests(unittest.TestCase):
 
     def test_folder_ranker_ignores_non_finite_scores(self) -> None:
         ranker = FolderRetrievalRanker(top_k=5)
-        valid_folder = RetrievedFolder(
+        valid_folder = SourceFolder(
             tenant="tenant-1",
             folder_id="folder-valid",
             source_version="folder-v1",
+            name="folder-valid",
             created_at="2026-05-01T10:00:00+09:00",
             updated_at="2026-05-02T11:00:00+09:00",
         )
-        invalid_folder = RetrievedFolder(
+        invalid_folder = SourceFolder(
             tenant="tenant-1",
             folder_id="folder-invalid",
             source_version="folder-v1",
+            name="folder-invalid",
             created_at="2026-05-01T10:00:00+09:00",
             updated_at="2026-05-02T11:00:00+09:00",
         )
@@ -406,18 +491,19 @@ class FolderRecommendationTests(unittest.TestCase):
             ["folder-valid"],
         )
 
-    def test_find_folders_aggregates_runtime_hits_by_folder_id(self) -> None:
+    async def test_find_folders_aggregates_runtime_hits_by_folder_id(self) -> None:
         embeddings = FakeEmbeddingProvider()
         documents = FakeDocumentVectorStore()
         graph = FakeGraphStore()
         folders = FakeFolderVectorStore()
-        use_case = FindFoldersUseCase(
+        service = FolderSearchService(
             retrieval=FolderRetrievalService(
                 embeddings=embeddings,
                 chunk_vectors=documents,
                 document_vectors=documents,
                 folder_vectors=folders,
                 graph=graph,
+                retrieval_reads=FakeRetrievalReadSessionProvider(),
                 top_k=3,
             ),
             scope_resolver=RelationshipScopeResolver(graph=graph),
@@ -429,7 +515,7 @@ class FolderRecommendationTests(unittest.TestCase):
             scope=scope,
         )
 
-        results = use_case.execute(query).results
+        results = await service.search(query)
 
         self.assertEqual(
             [result.folder.folder_id for result in results],
@@ -452,37 +538,39 @@ class FolderRecommendationTests(unittest.TestCase):
         self.assertIn("Similar indexed chunk", results[0].reason)
         self.assertIn("Graph-related document", results[0].reason)
 
-    def test_find_folders_rejects_embedding_count_mismatch(self) -> None:
+    async def test_find_folders_rejects_embedding_count_mismatch(self) -> None:
         with self.assertRaises(ProviderContractError):
-            FindFoldersUseCase(
+            await FolderSearchService(
                 retrieval=FolderRetrievalService(
                     embeddings=ShortEmbeddingProvider(),
                     chunk_vectors=FakeDocumentVectorStore(),
                     document_vectors=FakeDocumentVectorStore(),
                     folder_vectors=FakeFolderVectorStore(),
                     graph=FakeGraphStore(),
+                    retrieval_reads=FakeRetrievalReadSessionProvider(),
                 ),
                 scope_resolver=RelationshipScopeResolver(graph=FakeGraphStore()),
-            ).execute(
+            ).search(
                 FolderSearchQuery(
                     text="창업과 관련된 폴더",
                     tenant="tenant-1",
                 )
             )
 
-    def test_find_folders_keeps_folder_vector_scope_when_only_folder_ids_apply(
+    async def test_find_folders_keeps_folder_vector_scope_when_only_folder_ids_apply(
         self,
     ) -> None:
         documents = FakeDocumentVectorStore()
         graph = FakeGraphStore()
         folders = FakeFolderVectorStore()
-        use_case = FindFoldersUseCase(
+        service = FolderSearchService(
             retrieval=FolderRetrievalService(
                 embeddings=FakeEmbeddingProvider(),
                 chunk_vectors=documents,
                 document_vectors=documents,
                 folder_vectors=folders,
                 graph=graph,
+                retrieval_reads=FakeRetrievalReadSessionProvider(),
                 top_k=3,
             ),
             scope_resolver=RelationshipScopeResolver(graph=graph),
@@ -494,58 +582,96 @@ class FolderRecommendationTests(unittest.TestCase):
             scope=scope,
         )
 
-        use_case.execute(query)
+        await service.search(query)
 
         self.assertEqual(len(folders.scopes), 1)
         self.assertEqual(folders.scope.folder_ids, ("folder-b",))
 
-    def test_find_folders_still_searches_scoped_folder_vectors_without_document_matches(
+    async def test_find_folders_still_searches_scoped_folder_vectors_without_document_matches(
         self,
     ) -> None:
         folders = FakeFolderVectorStore()
         graph = EmptyRelationshipScopeGraphStore()
-        use_case = FindFoldersUseCase(
+        service = FolderSearchService(
             retrieval=FolderRetrievalService(
                 embeddings=FakeEmbeddingProvider(),
                 chunk_vectors=FailingDocumentVectorStore(),
                 document_vectors=FailingDocumentVectorStore(),
                 folder_vectors=folders,
                 graph=graph,
+                retrieval_reads=FakeRetrievalReadSessionProvider(),
                 top_k=3,
             ),
             scope_resolver=RelationshipScopeResolver(graph=graph),
         )
 
-        results = use_case.execute(
+        results = await service.search(
             FolderSearchQuery(
                 text="창업 폴더",
                 tenant="tenant-1",
                 scope=SearchScope(folder_ids=("folder-b",)),
             )
-        ).results
+        )
 
         self.assertEqual([result.folder.folder_id for result in results], ["folder-b"])
         self.assertEqual(len(folders.scopes), 1)
         self.assertEqual(folders.scope.folder_ids, ("folder-b",))
 
-    def test_find_folders_returns_empty_for_unresolved_tag_scope_without_vector_leak(
+    async def test_find_folders_returns_keyword_matches_without_folder_vectors(
+        self,
+    ) -> None:
+        folder_sources = FakeFolderSourceRepository(
+            name_matches=((_folder("folder-name"), 0.7),),
+            description_matches=((_folder("folder-description"), 0.4),),
+        )
+        graph = EmptyRelationshipScopeGraphStore()
+        service = FolderSearchService(
+            retrieval=FolderRetrievalService(
+                embeddings=FakeEmbeddingProvider(),
+                chunk_vectors=FailingDocumentVectorStore(),
+                document_vectors=FailingDocumentVectorStore(),
+                folder_vectors=EmptyFolderVectorStore(),
+                graph=graph,
+                retrieval_reads=FakeRetrievalReadSessionProvider(folder_sources),
+                top_k=3,
+            ),
+            scope_resolver=RelationshipScopeResolver(graph=graph),
+        )
+
+        results = await service.search(
+            FolderSearchQuery(
+                text="창업 폴더",
+                tenant="tenant-1",
+                scope=SearchScope(folder_ids=("folder-name", "folder-description")),
+            )
+        )
+
+        self.assertEqual(
+            [result.folder.folder_id for result in results],
+            ["folder-name", "folder-description"],
+        )
+        self.assertIn("Folder name matches keyword.", results[0].reason)
+        self.assertIn("Folder description matches keyword.", results[1].reason)
+
+    async def test_find_folders_returns_empty_for_unresolved_tag_scope_without_vector_leak(
         self,
     ) -> None:
         folders = FakeFolderVectorStore()
         graph = EmptyRelationshipScopeGraphStore()
-        use_case = FindFoldersUseCase(
+        service = FolderSearchService(
             retrieval=FolderRetrievalService(
                 embeddings=FakeEmbeddingProvider(),
                 chunk_vectors=FailingDocumentVectorStore(),
                 document_vectors=FailingDocumentVectorStore(),
                 folder_vectors=folders,
                 graph=graph,
+                retrieval_reads=FakeRetrievalReadSessionProvider(),
                 top_k=3,
             ),
             scope_resolver=RelationshipScopeResolver(graph=graph),
         )
 
-        results = use_case.execute(
+        results = await service.search(
             FolderSearchQuery(
                 text="창업 폴더",
                 tenant="tenant-1",
@@ -553,43 +679,27 @@ class FolderRecommendationTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(results.results, ())
+        self.assertEqual(results, ())
         self.assertEqual(folders.scopes, [])
 
-    def test_recommend_folder_returns_folder_id_centered_result(self) -> None:
+    async def test_recommend_folder_returns_folder_id_centered_result(self) -> None:
         graph = FakeGraphStore()
-        result = RecommendFolderUseCase(
-            find_folders=FindFoldersUseCase(
+        result = await FolderRecommendationService(
+            folder_search=FolderSearchService(
                 retrieval=FolderRetrievalService(
                     embeddings=FakeEmbeddingProvider(),
                     chunk_vectors=FakeDocumentVectorStore(),
                     document_vectors=FakeDocumentVectorStore(),
                     folder_vectors=FakeFolderVectorStore(),
                     graph=graph,
+                    retrieval_reads=FakeRetrievalReadSessionProvider(),
                     top_k=1,
                 ),
                 scope_resolver=RelationshipScopeResolver(graph=graph),
             )
-        ).execute(
-            RecommendFolderCommand(
-                tenant="tenant-1",
-                document_type="document",
-                document_id="doc-new",
-                source_version="v1",
-                created_at="2026-05-01T10:00:00+09:00",
-                updated_at="2026-05-02T11:00:00+09:00",
-                title="Startup memo",
-                body="창업 아이디어 정리",
-            )
-        )
-
-        self.assertEqual(result.primary.folder_id, "folder-a")
-        self.assertEqual(round(result.confidence, 2), 0.8)
-
-    def test_recommend_folder_raises_when_no_candidates_exist(self) -> None:
-        with self.assertRaises(NoCandidatesError):
-            RecommendFolderUseCase(find_folders=NoFolderCandidates()).execute(
-                RecommendFolderCommand(
+        ).recommend(
+            FolderRecommendationSource(
+                document=SourceDocument(
                     tenant="tenant-1",
                     document_type="document",
                     document_id="doc-new",
@@ -598,31 +708,58 @@ class FolderRecommendationTests(unittest.TestCase):
                     updated_at="2026-05-02T11:00:00+09:00",
                     title="Startup memo",
                     body="창업 아이디어 정리",
+                ),
+            )
+        )
+
+        self.assertEqual(result.primary.folder_id, "folder-a")
+        self.assertEqual(round(result.confidence, 2), 0.8)
+
+    async def test_recommend_folder_raises_when_no_candidates_exist(self) -> None:
+        with self.assertRaises(NoCandidatesError):
+            service = FolderRecommendationService(
+                folder_search=NoFolderCandidates()
+            )
+            await service.recommend(
+                FolderRecommendationSource(
+                    document=SourceDocument(
+                        tenant="tenant-1",
+                        document_type="document",
+                        document_id="doc-new",
+                        source_version="v1",
+                        created_at="2026-05-01T10:00:00+09:00",
+                        updated_at="2026-05-02T11:00:00+09:00",
+                        title="Startup memo",
+                        body="창업 아이디어 정리",
+                    ),
                 )
             )
 
-    def test_find_folders_returns_no_candidates_for_empty_source_document(self) -> None:
+    async def test_find_folders_returns_no_candidates_for_empty_source_document(
+        self,
+    ) -> None:
         embeddings = FakeEmbeddingProvider()
         graph = FakeGraphStore()
-        use_case = FindFoldersUseCase(
+        service = FolderSearchService(
             retrieval=FolderRetrievalService(
                 embeddings=embeddings,
                 chunk_vectors=FakeDocumentVectorStore(),
                 document_vectors=FakeDocumentVectorStore(),
                 folder_vectors=FakeFolderVectorStore(),
                 graph=graph,
+                retrieval_reads=FakeRetrievalReadSessionProvider(),
             ),
             scope_resolver=RelationshipScopeResolver(graph=graph),
         )
 
-        results = use_case.execute(
+        results = await service.search(
             FolderSearchQuery(
                 tenant="tenant-1",
                 text=" ",
             )
         )
 
-        self.assertEqual(results.results, ())
+        self.assertEqual(results, ())
         self.assertEqual(embeddings.texts, [])
 
 
@@ -637,14 +774,9 @@ def _chunk(*, document_id: str) -> DocumentChunk:
         updated_at="2026-05-02T11:00:00+09:00",
         chunk_id=f"{document_id}:chunk:0",
         chunk_index=0,
-        chunking_version="chunking-test-v1",
         text="startup notes",
-        text_hash="hash-1",
         start_offset=0,
         end_offset=len("startup notes"),
-        embedding_model="test-embedding",
-        embedding_version="test-v1",
-        index_schema_version="schema-v1",
     )
 
 
@@ -660,6 +792,17 @@ def _retrieved_document(*, document_id: str) -> RetrievedDocument:
     )
 
 
+def _folder(folder_id: str) -> SourceFolder:
+    return SourceFolder(
+        tenant="tenant-1",
+        folder_id=folder_id,
+        source_version="folder-v1",
+        name=folder_id,
+        created_at="2026-05-01T10:00:00+09:00",
+        updated_at="2026-05-02T11:00:00+09:00",
+    )
+
+
 def _folder_retrieval_service(
     *,
     top_k: object = 5,
@@ -671,6 +814,7 @@ def _folder_retrieval_service(
         document_vectors=FakeDocumentVectorStore(),
         folder_vectors=FakeFolderVectorStore(),
         graph=FakeGraphStore(),
+        retrieval_reads=FakeRetrievalReadSessionProvider(),
         top_k=top_k,  # type: ignore[arg-type]
         candidate_multiplier=candidate_multiplier,  # type: ignore[arg-type]
     )

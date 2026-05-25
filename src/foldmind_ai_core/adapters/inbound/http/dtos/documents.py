@@ -7,6 +7,11 @@ from pydantic import Field
 from foldmind_ai_core.adapters.inbound.http.dtos.dto_model import APIDTO
 
 
+class SourceDocumentFolderRelationSnapshotDTO(APIDTO):
+    folder_ids: tuple[str, ...] = ()
+    source_version: str | None = None
+
+
 class SourceDocumentDTO(APIDTO):
     tenant: str
     document_type: str | None = None
@@ -17,6 +22,7 @@ class SourceDocumentDTO(APIDTO):
     created_at: str
     updated_at: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    folder_relation_snapshot: SourceDocumentFolderRelationSnapshotDTO | None = None
 
 
 class RetrievedDocumentDTO(APIDTO):

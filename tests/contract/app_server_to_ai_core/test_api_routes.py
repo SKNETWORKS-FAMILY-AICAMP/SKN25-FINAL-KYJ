@@ -7,48 +7,34 @@ from fastapi.testclient import TestClient
 
 from foldmind_ai_core.adapters.inbound.http.routers.indexing import create_indexing_router
 from foldmind_ai_core.adapters.inbound.http.routers.tasks import create_tasks_router
-from foldmind_ai_core.core.application.errors import ResourceNotFoundError
-from foldmind_ai_core.core.application.commands.indexing import (
+from foldmind_ai_core.bootstrap.api_services import APIApplicationServices
+from foldmind_ai_core.bootstrap.app_factory import create_app
+from foldmind_ai_core.bootstrap.settings import APISettings
+from foldmind_ai_core.core.application.models.indexing import (
     DeleteDocumentIndexCommand,
     DeleteFolderIndexCommand,
     IndexDocumentCommand,
-    IndexFolderCommand,
-    UpdateDocumentFolderRelationsCommand,
 )
-from foldmind_ai_core.core.application.commands.workflow import (
+from foldmind_ai_core.core.application.models.task_commands import (
     AppendTaskInputCommand,
     CreateTaskCommand,
     GetTaskQuery,
-    HostActionResultCommand,
     RecordActionResultCommand,
     RemoveTaskInputCommand,
 )
-from foldmind_ai_core.core.application.factories.workflow_commands import (
-    task_context_from_command,
-)
-from foldmind_ai_core.core.application.factories.workflow_results import (
-    record_action_result_from_snapshot,
-    task_result_from_snapshot,
-)
-from foldmind_ai_core.core.application.results.indexing import (
+from foldmind_ai_core.core.application.errors import ResourceNotFoundError
+from foldmind_ai_core.core.application.models.indexing import (
     IndexDocumentResult,
-    IndexFolderResult,
 )
-from foldmind_ai_core.core.application.results.retrieval import (
-    RetrievedChunkResult,
-)
-from foldmind_ai_core.core.application.results.workflow import (
+from foldmind_ai_core.core.application.models.task_results import (
     RecordActionResult,
-    TaskResult,
 )
-from foldmind_ai_core.bootstrap.api_use_cases import APIUseCases
-from foldmind_ai_core.bootstrap.app_factory import create_app
-from foldmind_ai_core.bootstrap.settings import APISettings
-from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
-from foldmind_ai_core.core.application.queries.retrieval import (
-    RetrievalQuery,
+from foldmind_ai_core.core.domain.models.host_actions import HostActionResult
+from foldmind_ai_core.core.domain.models.folder_sources import (
+    FolderSourceIdentity,
+    SourceFolder,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.tasks import (
     TaskAnalysis,
     TaskContext,
     TaskInputEntry,
@@ -67,138 +53,43 @@ SOURCE_UPDATED_AT = "2026-05-02T11:00:00+09:00"
 REQUESTED_AT = "2026-05-17T09:30:00+09:00"
 
 
-def make_chunk(chunk_id: str = "doc-1:chunk:0", text: str = "meeting notes") -> DocumentChunk:
-    return DocumentChunk(
-        tenant="tenant-1",
-        document_type="document",
-        document_id="doc-1",
-        source_version="v1",
-        document_index_input_digest="index-input-v1",
-        created_at="2026-05-01T10:00:00+09:00",
-        updated_at="2026-05-02T11:00:00+09:00",
-        chunk_id=chunk_id,
-        chunk_index=0,
-        chunking_version="chunking-test-v1",
-        text=text,
-        text_hash="hash-1",
-        start_offset=0,
-        end_offset=len(text),
-        embedding_model="test-embedding",
-        embedding_version="test-v1",
-        index_schema_version="schema-v1",
-    )
-
-
-def make_retrieved_chunk_result(
-    chunk_id: str = "doc-1:chunk:0",
-    text: str = "meeting notes",
-    score: float = 0.75,
-) -> RetrievedChunkResult:
-    chunk = make_chunk(chunk_id=chunk_id, text=text)
-    return RetrievedChunkResult(
-        tenant=chunk.tenant,
-        document_type=chunk.document_type,
-        document_id=chunk.document_id,
-        source_version=chunk.source_version,
-        document_index_input_digest=chunk.document_index_input_digest,
-        created_at=chunk.created_at,
-        updated_at=chunk.updated_at,
-        chunk_id=chunk.chunk_id,
-        chunk_index=chunk.chunk_index,
-        chunking_version=chunk.chunking_version,
-        text=chunk.text,
-        text_hash=chunk.text_hash,
-        start_offset=chunk.start_offset,
-        end_offset=chunk.end_offset,
-        embedding_model=chunk.embedding_model,
-        embedding_version=chunk.embedding_version,
-        index_schema_version=chunk.index_schema_version,
-        score=score,
-        metadata=dict(chunk.metadata),
-    )
-
-
-class FakeIndexDocumentUseCase:
+class FakeDocumentIndexingService:
     def __init__(self) -> None:
         self.command: IndexDocumentCommand | None = None
+        self.deleted: DeleteDocumentIndexCommand | None = None
 
-    def execute(self, command: IndexDocumentCommand) -> IndexDocumentResult:
+    async def index_document(self, command: IndexDocumentCommand) -> IndexDocumentResult:
         self.command = command
         return IndexDocumentResult(indexed_chunk_count=1)
 
-
-class FakeDeleteDocumentIndexUseCase:
-    def __init__(self) -> None:
-        self.deleted: DeleteDocumentIndexCommand | None = None
-
-    def execute(self, command: DeleteDocumentIndexCommand) -> None:
+    async def delete_document(self, command: DeleteDocumentIndexCommand) -> None:
         self.deleted = command
 
 
-class FakeUpdateDocumentFolderRelationsUseCase:
+class FakeFolderIndexingService:
     def __init__(self) -> None:
-        self.command: UpdateDocumentFolderRelationsCommand | None = None
-
-    def execute(self, command: UpdateDocumentFolderRelationsCommand) -> None:
-        self.command = command
-
-
-class FakeIndexFolderUseCase:
-    def __init__(self) -> None:
-        self.command: IndexFolderCommand | None = None
-
-    def execute(self, command: IndexFolderCommand) -> IndexFolderResult:
-        self.command = command
-        return IndexFolderResult(
-            tenant=command.tenant,
-            folder_id=command.folder_id,
-            source_version=command.source_version,
-        )
-
-
-class FakeDeleteFolderIndexUseCase:
-    def __init__(self) -> None:
+        self.folder: SourceFolder | None = None
         self.deleted: DeleteFolderIndexCommand | None = None
 
-    def execute(self, command: DeleteFolderIndexCommand) -> None:
+    async def index_folder(self, folder: SourceFolder) -> FolderSourceIdentity:
+        self.folder = folder
+        return FolderSourceIdentity(
+            tenant=folder.tenant,
+            folder_id=folder.folder_id,
+            source_version=folder.source_version,
+        )
+
+    async def delete_folder(self, command: DeleteFolderIndexCommand) -> None:
         self.deleted = command
 
 
-class FakeRunTaskUseCase:
+class FakeTaskWorkflowService:
     def __init__(self) -> None:
-        self.command: CreateTaskCommand | AppendTaskInputCommand | None = None
+        self.created: CreateTaskCommand | None = None
+        self.appended: AppendTaskInputCommand | None = None
+        self.removed: RemoveTaskInputCommand | None = None
+        self.recorded: HostActionResult | None = None
         self.missing_task_ids: set[str] = set()
-
-    def execute(self, command: CreateTaskCommand | AppendTaskInputCommand) -> TaskResult:
-        self.command = command
-        if isinstance(command, AppendTaskInputCommand) and command.task_id in self.missing_task_ids:
-            raise ResourceNotFoundError(f"Task not found: {command.task_id}")
-        task_id = command.task_id if isinstance(command, AppendTaskInputCommand) else TASK_ID
-        tenant = command.tenant if isinstance(command, CreateTaskCommand) else "tenant-1"
-        context = task_context_from_command(command.context)
-        return task_result_from_snapshot(
-            TaskSnapshot(
-                task_id=task_id,
-                tenant=tenant,
-                request=command.request,
-                context=context,
-                status=TaskStatus.CLARIFICATION_REQUIRED,
-                analysis=TaskAnalysis(message="Task accepted."),
-                inputs=[
-                    TaskInputEntry(
-                        task_input_id="99999999-9999-4999-8999-000000000000",
-                        task_id=task_id,
-                        input_text=command.request,
-                        context=context,
-                        position=0,
-                    )
-                ],
-            )
-        )
-
-
-class FakeGetTaskUseCase:
-    def __init__(self) -> None:
         self.snapshot = TaskSnapshot(
             task_id=TASK_ID,
             tenant="tenant-1",
@@ -208,21 +99,42 @@ class FakeGetTaskUseCase:
             analysis=TaskAnalysis(message="Task accepted."),
         )
 
-    def execute(self, query: GetTaskQuery) -> TaskResult:
+    async def create_task(self, command: CreateTaskCommand) -> TaskSnapshot:
+        self.created = command
+        return _task_snapshot(
+            task_id=TASK_ID,
+            tenant=command.tenant,
+            request=command.request,
+            context=command.context,
+        )
+
+    async def append_task_input(
+        self,
+        command: AppendTaskInputCommand,
+    ) -> TaskSnapshot:
+        self.appended = command
+        if command.task_id in self.missing_task_ids:
+            raise ResourceNotFoundError(f"Task not found: {command.task_id}")
+        return _task_snapshot(
+            task_id=command.task_id,
+            tenant="tenant-1",
+            request=command.request,
+            context=command.context,
+        )
+
+    async def get_task(self, query: GetTaskQuery) -> TaskSnapshot:
         if query.task_id != self.snapshot.task_id:
             raise ResourceNotFoundError(f"Task not found: {query.task_id}")
-        return task_result_from_snapshot(self.snapshot)
+        return self.snapshot
 
-
-class FakeRecordActionResultUseCase:
-    def __init__(self) -> None:
-        self.recorded: HostActionResultCommand | None = None
-
-    def execute(self, command: RecordActionResultCommand) -> RecordActionResult:
+    async def record_action_result(
+        self,
+        command: RecordActionResultCommand,
+    ) -> RecordActionResult:
         self.recorded = command.result
-        return record_action_result_from_snapshot(
+        return RecordActionResult(
             recorded=True,
-            snapshot=TaskSnapshot(
+            task=TaskSnapshot(
                 task_id=TASK_ID,
                 tenant="tenant-1",
                 request="Summarize the document",
@@ -233,82 +145,82 @@ class FakeRecordActionResultUseCase:
             ),
         )
 
-
-class FakeRemoveTaskInputUseCase:
-    def __init__(self) -> None:
-        self.removed: RemoveTaskInputCommand | None = None
-
-    def execute(self, command: RemoveTaskInputCommand) -> TaskResult:
+    async def remove_task_input(
+        self,
+        command: RemoveTaskInputCommand,
+    ) -> TaskSnapshot:
         self.removed = command
-        return task_result_from_snapshot(
-            TaskSnapshot(
-                task_id=TASK_ID,
-                tenant="tenant-1",
-                request="",
-                context=TaskContext(requested_at=REQUESTED_AT),
-                status=TaskStatus.CLARIFICATION_REQUIRED,
-                analysis=TaskAnalysis(message="Task has no active inputs."),
-                inputs=[
-                    TaskInputEntry(
-                        task_input_id=command.task_input_id,
-                        task_id=TASK_ID,
-                        input_text="Summarize the document",
-                        context=TaskContext(requested_at=REQUESTED_AT),
-                        position=0,
-                    )
-                ],
-            )
+        return TaskSnapshot(
+            task_id=TASK_ID,
+            tenant="tenant-1",
+            request="",
+            context=TaskContext(requested_at=REQUESTED_AT),
+            status=TaskStatus.CLARIFICATION_REQUIRED,
+            analysis=TaskAnalysis(message="Task has no active inputs."),
+            inputs=[
+                TaskInputEntry(
+                    task_input_id=command.task_input_id,
+                    task_id=TASK_ID,
+                    input_text="Summarize the document",
+                    context=TaskContext(requested_at=REQUESTED_AT),
+                    position=0,
+                )
+            ],
         )
+
+
+def _task_snapshot(
+    *,
+    task_id: str,
+    tenant: str,
+    request: str,
+    context: TaskContext,
+) -> TaskSnapshot:
+    return TaskSnapshot(
+        task_id=task_id,
+        tenant=tenant,
+        request=request,
+        context=context,
+        status=TaskStatus.CLARIFICATION_REQUIRED,
+        analysis=TaskAnalysis(message="Task accepted."),
+        inputs=[
+            TaskInputEntry(
+                task_input_id="99999999-9999-4999-8999-000000000000",
+                task_id=task_id,
+                input_text=request,
+                context=context,
+                position=0,
+            )
+        ],
+    )
 
 
 class ApiRouteTests(unittest.TestCase):
     def test_create_app_registers_routes(self) -> None:
-        use_cases = APIUseCases(
-            index_document=FakeIndexDocumentUseCase(),
-            delete_document_index=FakeDeleteDocumentIndexUseCase(),
-            update_document_folder_relations=FakeUpdateDocumentFolderRelationsUseCase(),
-            index_folder=FakeIndexFolderUseCase(),
-            delete_folder_index=FakeDeleteFolderIndexUseCase(),
-            run_task=FakeRunTaskUseCase(),
-            get_task=FakeGetTaskUseCase(),
-            remove_task_input=FakeRemoveTaskInputUseCase(),
-            record_action_result=FakeRecordActionResultUseCase(),
+        application_services = APIApplicationServices(
+            document_indexing=FakeDocumentIndexingService(),
+            folder_indexing=FakeFolderIndexingService(),
+            task_workflow=FakeTaskWorkflowService(),
         )
         app = create_app(
-            use_cases,
+            application_services,
             settings=APISettings(cors_origins=("http://localhost:3000",)),
         )
         client = TestClient(app)
 
         health_response = client.get("/health")
-        search_response = client.post(
-            "/retrieval/search",
-            json={
-                "query": {
-                    "text": "Find the last meeting notes",
-                    "request_context": {"tenant": "tenant-1"},
-                }
-            },
-        )
 
         self.assertEqual(health_response.status_code, 200)
         self.assertEqual(health_response.json(), {"status": "ok"})
-        self.assertEqual(search_response.status_code, 404)
 
-    def test_indexing_routes_call_use_cases(self) -> None:
-        index_document = FakeIndexDocumentUseCase()
-        delete_document_index = FakeDeleteDocumentIndexUseCase()
-        update_document_folder_relations = FakeUpdateDocumentFolderRelationsUseCase()
-        index_folder = FakeIndexFolderUseCase()
-        delete_folder_index = FakeDeleteFolderIndexUseCase()
+    def test_indexing_routes_call_application_services(self) -> None:
+        document_indexing = FakeDocumentIndexingService()
+        folder_indexing = FakeFolderIndexingService()
         app = FastAPI()
         app.include_router(
             create_indexing_router(
-                index_document=index_document,
-                delete_document_index=delete_document_index,
-                update_document_folder_relations=update_document_folder_relations,
-                index_folder=index_folder,
-                delete_folder_index=delete_folder_index,
+                document_indexing=document_indexing,
+                folder_indexing=folder_indexing,
             )
         )
         client = TestClient(app)
@@ -331,10 +243,10 @@ class ApiRouteTests(unittest.TestCase):
 
         self.assertEqual(index_response.status_code, 200)
         self.assertEqual(index_response.json(), {"indexed_chunk_count": 1})
-        self.assertIsNotNone(index_document.command)
-        self.assertEqual(index_document.command.document_id, DOCUMENT_ID)
-        self.assertEqual(index_document.command.created_at, SOURCE_CREATED_AT)
-        self.assertEqual(index_document.command.updated_at, SOURCE_UPDATED_AT)
+        self.assertIsNotNone(document_indexing.command)
+        self.assertEqual(document_indexing.command.document.document_id, DOCUMENT_ID)
+        self.assertEqual(document_indexing.command.document.created_at, SOURCE_CREATED_AT)
+        self.assertEqual(document_indexing.command.document.updated_at, SOURCE_UPDATED_AT)
 
         document_with_relation_response = client.post(
             "/indexing/documents",
@@ -356,7 +268,9 @@ class ApiRouteTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(document_with_relation_response.status_code, 422)
+        self.assertEqual(document_with_relation_response.status_code, 200)
+        self.assertIsNotNone(document_indexing.command)
+        self.assertEqual(document_indexing.command.folder_ids, (FOLDER_ID,))
 
         index_without_type_response = client.post(
             "/indexing/documents",
@@ -374,8 +288,8 @@ class ApiRouteTests(unittest.TestCase):
         )
 
         self.assertEqual(index_without_type_response.status_code, 200)
-        self.assertIsNotNone(index_document.command)
-        self.assertIsNone(index_document.command.document_type)
+        self.assertIsNotNone(document_indexing.command)
+        self.assertIsNone(document_indexing.command.document.document_type)
 
         missing_document_timestamp_response = client.post(
             "/indexing/documents",
@@ -429,39 +343,13 @@ class ApiRouteTests(unittest.TestCase):
         )
 
         self.assertEqual(normalized_index_response.status_code, 200)
-        self.assertIsNotNone(index_document.command)
-        self.assertEqual(index_document.command.tenant, "tenant-1")
-        self.assertEqual(index_document.command.document_type, "document")
-        self.assertEqual(index_document.command.document_id, DOCUMENT_ID)
-        self.assertEqual(index_document.command.source_version, "v1")
-        self.assertEqual(index_document.command.title, " Meeting notes ")
-        self.assertEqual(index_document.command.body, " Prepare next meeting ")
-
-        relation_update_response = client.put(
-            f"/indexing/documents/{DOCUMENT_ID}/folder-relations",
-            json={
-                "tenant": " tenant-1 ",
-                "source_version": " v2 ",
-                "folder_ids": [f" {FOLDER_ID} "],
-            },
-        )
-
-        self.assertEqual(relation_update_response.status_code, 204)
-        self.assertEqual(relation_update_response.content, b"")
-        self.assertIsNotNone(update_document_folder_relations.command)
-        self.assertEqual(update_document_folder_relations.command.tenant, "tenant-1")
-        self.assertEqual(
-            update_document_folder_relations.command.document_id,
-            DOCUMENT_ID,
-        )
-        self.assertEqual(
-            update_document_folder_relations.command.source_version,
-            "v2",
-        )
-        self.assertEqual(
-            update_document_folder_relations.command.folder_ids,
-            (FOLDER_ID,),
-        )
+        self.assertIsNotNone(document_indexing.command)
+        self.assertEqual(document_indexing.command.document.tenant, "tenant-1")
+        self.assertEqual(document_indexing.command.document.document_type, "document")
+        self.assertEqual(document_indexing.command.document.document_id, DOCUMENT_ID)
+        self.assertEqual(document_indexing.command.document.source_version, "v1")
+        self.assertEqual(document_indexing.command.document.title, " Meeting notes ")
+        self.assertEqual(document_indexing.command.document.body, " Prepare next meeting ")
 
         delete_response = client.delete(
             f"/indexing/documents/{DOCUMENT_ID}",
@@ -469,8 +357,8 @@ class ApiRouteTests(unittest.TestCase):
 
         self.assertEqual(delete_response.status_code, 204)
         self.assertEqual(delete_response.content, b"")
-        self.assertIsNotNone(delete_document_index.deleted)
-        self.assertEqual(delete_document_index.deleted.document_id, DOCUMENT_ID)
+        self.assertIsNotNone(document_indexing.deleted)
+        self.assertEqual(document_indexing.deleted.document_id, DOCUMENT_ID)
 
         delete_normalized_response = client.delete(
             f"/indexing/documents/ {DOCUMENT_ID} ",
@@ -478,8 +366,8 @@ class ApiRouteTests(unittest.TestCase):
 
         self.assertEqual(delete_normalized_response.status_code, 204)
         self.assertEqual(delete_normalized_response.content, b"")
-        self.assertIsNotNone(delete_document_index.deleted)
-        self.assertEqual(delete_document_index.deleted.document_id, DOCUMENT_ID)
+        self.assertIsNotNone(document_indexing.deleted)
+        self.assertEqual(document_indexing.deleted.document_id, DOCUMENT_ID)
 
         delete_with_blank_document_id_response = client.delete(
             "/indexing/documents/%20",
@@ -512,10 +400,10 @@ class ApiRouteTests(unittest.TestCase):
             index_folder_response.json()["folder"]["source_version"],
             "folder-v1",
         )
-        self.assertIsNotNone(index_folder.command)
-        self.assertEqual(index_folder.command.name, "Startup")
-        self.assertEqual(index_folder.command.created_at, SOURCE_CREATED_AT)
-        self.assertEqual(index_folder.command.updated_at, SOURCE_UPDATED_AT)
+        self.assertIsNotNone(folder_indexing.folder)
+        self.assertEqual(folder_indexing.folder.name, "Startup")
+        self.assertEqual(folder_indexing.folder.created_at, SOURCE_CREATED_AT)
+        self.assertEqual(folder_indexing.folder.updated_at, SOURCE_UPDATED_AT)
 
         naive_folder_timestamp_response = client.post(
             "/indexing/folders",
@@ -555,8 +443,8 @@ class ApiRouteTests(unittest.TestCase):
 
         self.assertEqual(delete_folder_response.status_code, 204)
         self.assertEqual(delete_folder_response.content, b"")
-        self.assertIsNotNone(delete_folder_index.deleted)
-        self.assertEqual(delete_folder_index.deleted.folder_id, FOLDER_ID)
+        self.assertIsNotNone(folder_indexing.deleted)
+        self.assertEqual(folder_indexing.deleted.folder_id, FOLDER_ID)
 
         delete_folder_normalized_response = client.delete(
             f"/indexing/folders/ {FOLDER_ID} ",
@@ -564,22 +452,16 @@ class ApiRouteTests(unittest.TestCase):
 
         self.assertEqual(delete_folder_normalized_response.status_code, 204)
         self.assertEqual(delete_folder_normalized_response.content, b"")
-        self.assertIsNotNone(delete_folder_index.deleted)
-        self.assertEqual(delete_folder_index.deleted.folder_id, FOLDER_ID)
+        self.assertIsNotNone(folder_indexing.deleted)
+        self.assertEqual(folder_indexing.deleted.folder_id, FOLDER_ID)
 
     def test_retrieval_routes_are_not_public_api(self) -> None:
-        use_cases = APIUseCases(
-            index_document=FakeIndexDocumentUseCase(),
-            delete_document_index=FakeDeleteDocumentIndexUseCase(),
-            update_document_folder_relations=FakeUpdateDocumentFolderRelationsUseCase(),
-            index_folder=FakeIndexFolderUseCase(),
-            delete_folder_index=FakeDeleteFolderIndexUseCase(),
-            run_task=FakeRunTaskUseCase(),
-            get_task=FakeGetTaskUseCase(),
-            remove_task_input=FakeRemoveTaskInputUseCase(),
-            record_action_result=FakeRecordActionResultUseCase(),
+        application_services = APIApplicationServices(
+            document_indexing=FakeDocumentIndexingService(),
+            folder_indexing=FakeFolderIndexingService(),
+            task_workflow=FakeTaskWorkflowService(),
         )
-        client = TestClient(create_app(use_cases, settings=APISettings()))
+        client = TestClient(create_app(application_services, settings=APISettings()))
 
         for path in (
             "/retrieval/search",
@@ -593,18 +475,12 @@ class ApiRouteTests(unittest.TestCase):
                 response = client.get(path)
             self.assertEqual(response.status_code, 404)
 
-    def test_task_routes_call_use_cases(self) -> None:
-        run_task = FakeRunTaskUseCase()
-        get_task = FakeGetTaskUseCase()
-        record_action_result = FakeRecordActionResultUseCase()
-        remove_task_input = FakeRemoveTaskInputUseCase()
+    def test_task_routes_call_application_services(self) -> None:
+        task_workflow = FakeTaskWorkflowService()
         app = FastAPI()
         app.include_router(
             create_tasks_router(
-                run_task=run_task,
-                get_task=get_task,
-                remove_task_input=remove_task_input,
-                record_action_result=record_action_result,
+                task_workflow=task_workflow,
             )
         )
         client = TestClient(app)
@@ -630,11 +506,11 @@ class ApiRouteTests(unittest.TestCase):
         )
         self.assertEqual(create_response.json()["task"]["status"], "clarification_required")
         self.assertEqual(create_response.json()["task"]["analysis"]["message"], "Task accepted.")
-        self.assertIsNotNone(run_task.command)
-        self.assertIsInstance(run_task.command, CreateTaskCommand)
-        self.assertEqual(run_task.command.context.requested_at, REQUESTED_AT)
-        self.assertEqual(run_task.command.context.document_id, DOCUMENT_ID)
-        self.assertEqual(run_task.command.context.folder_id, FOLDER_ID)
+        self.assertIsNotNone(task_workflow.created)
+        self.assertIsInstance(task_workflow.created, CreateTaskCommand)
+        self.assertEqual(task_workflow.created.context.requested_at, REQUESTED_AT)
+        self.assertEqual(task_workflow.created.context.document_id, DOCUMENT_ID)
+        self.assertEqual(task_workflow.created.context.folder_id, FOLDER_ID)
         self.assertNotIn("requested_at", create_response.json()["task"])
         self.assertEqual(
             create_response.json()["task"]["context"]["document_id"],
@@ -647,7 +523,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(create_response.json()["task"]["jobs"], [])
         self.assertIsNone(create_response.json()["task"]["result"])
         task_input_id = create_response.json()["task"]["inputs"][0]["task_input_id"]
-        get_task.snapshot.task_id = created_task_id
+        task_workflow.snapshot.task_id = created_task_id
 
         blank_tenant_response = client.post(
             "/tasks",
@@ -700,9 +576,9 @@ class ApiRouteTests(unittest.TestCase):
         )
 
         self.assertEqual(append_response.status_code, 200)
-        self.assertIsInstance(run_task.command, AppendTaskInputCommand)
-        self.assertEqual(run_task.command.task_id, created_task_id)
-        self.assertEqual(run_task.command.context.requested_at, REQUESTED_AT)
+        self.assertIsInstance(task_workflow.appended, AppendTaskInputCommand)
+        self.assertEqual(task_workflow.appended.task_id, created_task_id)
+        self.assertEqual(task_workflow.appended.context.requested_at, REQUESTED_AT)
 
         naive_append_response = client.post(
             f"/tasks/{created_task_id}/inputs",
@@ -715,7 +591,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(naive_append_response.status_code, 422)
 
         missing_append_task_id = "99999999-9999-4999-8999-999999999999"
-        run_task.missing_task_ids.add(missing_append_task_id)
+        task_workflow.missing_task_ids.add(missing_append_task_id)
         missing_append_response = client.post(
             f"/tasks/{missing_append_task_id}/inputs",
             json={
@@ -728,8 +604,8 @@ class ApiRouteTests(unittest.TestCase):
         remove_response = client.delete(f"/tasks/inputs/{task_input_id}")
 
         self.assertEqual(remove_response.status_code, 200)
-        self.assertIsNotNone(remove_task_input.removed)
-        self.assertEqual(remove_task_input.removed.task_input_id, task_input_id)
+        self.assertIsNotNone(task_workflow.removed)
+        self.assertEqual(task_workflow.removed.task_input_id, task_input_id)
 
         invalid_remove_response = client.delete("/tasks/inputs/not-a-uuid")
 
@@ -754,10 +630,10 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(record_response.status_code, 200)
         self.assertEqual(record_response.json()["recorded"], True)
         self.assertEqual(record_response.json()["task"]["status"], "completed")
-        self.assertIsNotNone(record_action_result.recorded)
-        self.assertEqual(record_action_result.recorded.action_id, ACTION_ID)
+        self.assertIsNotNone(task_workflow.recorded)
+        self.assertEqual(task_workflow.recorded.action_id, ACTION_ID)
         self.assertEqual(
-            record_action_result.recorded.output.moved_document_id,
+            task_workflow.recorded.output.moved_document_id,
             DOCUMENT_ID,
         )
 

@@ -1,32 +1,28 @@
 from __future__ import annotations
 
+from foldmind_ai_core.adapters.inbound.http.dtos.documents import RetrievedFolderDTO
 from foldmind_ai_core.adapters.inbound.http.dtos.indexing import (
     IndexDocumentRequest,
     IndexDocumentResponse,
     IndexFolderRequest,
     IndexFolderResponse,
-    UpdateDocumentFolderRelationsRequest,
 )
-from foldmind_ai_core.adapters.inbound.http.dtos.documents import RetrievedFolderDTO
 from foldmind_ai_core.adapters.inbound.http.mappers.documents import (
     index_document_command_from_dto,
-    index_folder_command_from_dto,
+    source_folder_from_dto,
 )
-from foldmind_ai_core.core.application.commands.indexing import (
+from foldmind_ai_core.core.application.models.indexing import (
     DeleteDocumentIndexCommand,
     DeleteFolderIndexCommand,
     IndexDocumentCommand,
-    IndexFolderCommand,
-    UpdateDocumentFolderRelationsCommand,
 )
-from foldmind_ai_core.core.application.results.indexing import (
-    IndexDocumentResult,
-    IndexFolderResult,
+from foldmind_ai_core.core.application.models.indexing import IndexDocumentResult
+from foldmind_ai_core.core.domain.models.folder_sources import (
+    FolderSourceIdentity,
+    SourceFolder,
 )
 from foldmind_ai_core.shared.validation import (
-    require_non_blank,
     require_uuid,
-    require_uuid_items,
 )
 
 
@@ -34,19 +30,6 @@ def index_document_command_from_request(
     request: IndexDocumentRequest,
 ) -> IndexDocumentCommand:
     return index_document_command_from_dto(request.document)
-
-
-def update_document_folder_relations_command_from_request(
-    *,
-    document_id: str,
-    request: UpdateDocumentFolderRelationsRequest,
-) -> UpdateDocumentFolderRelationsCommand:
-    return UpdateDocumentFolderRelationsCommand(
-        tenant=require_non_blank(request.tenant, "tenant"),
-        document_id=require_uuid(document_id, "document_id"),
-        source_version=require_non_blank(request.source_version, "source_version"),
-        folder_ids=_unique_uuid_items(request.folder_ids, "folder_ids"),
-    )
 
 
 def delete_document_index_command_from_document_id(
@@ -57,19 +40,8 @@ def delete_document_index_command_from_document_id(
     )
 
 
-def _unique_uuid_items(values: tuple[str, ...], field_name: str) -> tuple[str, ...]:
-    seen: set[str] = set()
-    unique: list[str] = []
-    for value in require_uuid_items(values, field_name):
-        if value in seen:
-            continue
-        seen.add(value)
-        unique.append(value)
-    return tuple(unique)
-
-
-def index_folder_command_from_request(request: IndexFolderRequest) -> IndexFolderCommand:
-    return index_folder_command_from_dto(request.folder)
+def source_folder_from_request(request: IndexFolderRequest) -> SourceFolder:
+    return source_folder_from_dto(request.folder)
 
 
 def delete_folder_index_command_from_folder_id(
@@ -86,7 +58,9 @@ def index_document_response_from_result(
     return IndexDocumentResponse(indexed_chunk_count=result.indexed_chunk_count)
 
 
-def index_folder_response_from_result(result: IndexFolderResult) -> IndexFolderResponse:
+def index_folder_response_from_result(
+    result: FolderSourceIdentity,
+) -> IndexFolderResponse:
     return IndexFolderResponse(
         folder=RetrievedFolderDTO(
             tenant=result.tenant,

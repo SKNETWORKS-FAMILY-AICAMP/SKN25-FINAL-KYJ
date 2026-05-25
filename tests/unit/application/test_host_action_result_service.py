@@ -6,7 +6,7 @@ from foldmind_ai_core.core.application.workflows.host_actions.result_service imp
     HostActionResultService,
 )
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.domain.models.host_actions import (
     CreateDocumentInput,
     CreateFolderInput,
     HostAction,
@@ -17,7 +17,7 @@ from foldmind_ai_core.core.domain.models.workflow.actions import (
     HostActionType,
     LinkDocumentsInput,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.tasks import (
     TaskAnalysis,
     TaskContext,
     TaskSnapshot,

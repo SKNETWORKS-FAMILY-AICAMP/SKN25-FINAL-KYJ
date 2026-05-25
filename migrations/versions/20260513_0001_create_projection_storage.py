@@ -51,7 +51,7 @@ CREATE TRIGGER {table_name}_set_updated_at
 
 SCHEMA_SQL_FILES: tuple[SqlFile, ...] = (
     ("postgres extensions", "00_extensions.sql"),
-    ("tenant and source snapshots", "10_tenant_and_source_snapshots.sql"),
+    ("tenant and source records", "10_tenant_and_sources.sql"),
     ("source document folder relations", "15_source_document_folder_relations.sql"),
     ("document projections", "20_document_projections.sql"),
     ("folder projections", "30_folder_projections.sql"),

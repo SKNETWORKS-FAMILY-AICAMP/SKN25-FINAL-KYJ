@@ -1,1 +1,0 @@
-"""FoldMind AI Core package."""

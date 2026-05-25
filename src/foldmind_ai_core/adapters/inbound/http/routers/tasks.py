@@ -23,20 +23,12 @@ from foldmind_ai_core.adapters.inbound.http.mappers.tasks import (
     remove_task_input_command_from_path,
     task_snapshot_response_from_result,
 )
-from foldmind_ai_core.core.application.ports.inbound.workflow import (
-    GetTaskInboundPort,
-    RecordActionResultInboundPort,
-    RemoveTaskInputInboundPort,
-    RunTaskInboundPort,
-)
+from foldmind_ai_core.core.application.ports.inbound.workflow import TaskWorkflowServicePort
 
 
 def create_tasks_router(
     *,
-    run_task: RunTaskInboundPort,
-    get_task: GetTaskInboundPort,
-    remove_task_input: RemoveTaskInputInboundPort,
-    record_action_result: RecordActionResultInboundPort,
+    task_workflow: TaskWorkflowServicePort,
 ) -> APIRouter:
     router = APIRouter(
         prefix="/tasks",
@@ -45,16 +37,16 @@ def create_tasks_router(
     )
 
     @router.post("", response_model=TaskSnapshotResponse)
-    def create_task_endpoint(request: CreateTaskRequest) -> TaskSnapshotResponse:
-        result = run_task.execute(create_task_command_from_request(request))
+    async def create_task_endpoint(request: CreateTaskRequest) -> TaskSnapshotResponse:
+        result = await task_workflow.create_task(create_task_command_from_request(request))
         return task_snapshot_response_from_result(result)
 
     @router.post("/{task_id}/inputs", response_model=TaskSnapshotResponse)
-    def append_task_input_endpoint(
+    async def append_task_input_endpoint(
         task_id: str,
         request: AppendTaskInputRequest,
     ) -> TaskSnapshotResponse:
-        result = run_task.execute(
+        result = await task_workflow.append_task_input(
             append_task_command_from_request(
                 task_id=task_id,
                 request=request,
@@ -63,18 +55,18 @@ def create_tasks_router(
         return task_snapshot_response_from_result(result)
 
     @router.get("/{task_id}", response_model=TaskSnapshotResponse)
-    def get_task_endpoint(task_id: str) -> TaskSnapshotResponse:
-        result = get_task.execute(get_task_query_from_path(task_id=task_id))
+    async def get_task_endpoint(task_id: str) -> TaskSnapshotResponse:
+        result = await task_workflow.get_task(get_task_query_from_path(task_id=task_id))
         return task_snapshot_response_from_result(result)
 
     @router.delete(
         "/inputs/{task_input_id}",
         response_model=TaskSnapshotResponse,
     )
-    def remove_task_input_endpoint(
+    async def remove_task_input_endpoint(
         task_input_id: str,
     ) -> TaskSnapshotResponse:
-        result = remove_task_input.execute(
+        result = await task_workflow.remove_task_input(
             remove_task_input_command_from_path(
                 task_input_id=task_input_id,
             )
@@ -82,10 +74,10 @@ def create_tasks_router(
         return task_snapshot_response_from_result(result)
 
     @router.post("/actions/result", response_model=RecordHostActionResultResponse)
-    def record_action_result_endpoint(
+    async def record_action_result_endpoint(
         request: RecordHostActionResultRequest,
     ) -> RecordHostActionResultResponse:
-        result = record_action_result.execute(
+        result = await task_workflow.record_action_result(
             record_action_result_command_from_request(request)
         )
         return record_action_result_response_from_result(result)

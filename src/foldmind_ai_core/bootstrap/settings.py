@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from enum import StrEnum
 from typing import Annotated, Any, cast
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -59,7 +59,7 @@ _OPTIONAL_SETTING_FIELDS = (
     "openai_api_key",
     "openai_base_url",
     "prompt_root",
-    "document_profile_prompt_version",
+    "document_signal_extraction_prompt_version",
     "workflow_checkpoint_dsn",
     "postgres_dsn",
     "qdrant_url",
@@ -130,7 +130,7 @@ class APISettings(BaseSettings):
     prompt_root: str | None = Field(
         default=None,
     )
-    document_profile_prompt_version: str | None = Field(
+    document_signal_extraction_prompt_version: str | None = Field(
         default=None,
     )
     workflow_checkpoint_dsn: str | None = Field(
@@ -219,6 +219,11 @@ class APISettings(BaseSettings):
         default=1.0,
         ge=0.0,
     )
+    purge_after_days: int = Field(
+        default=90,
+        gt=0,
+        validation_alias=AliasChoices("PURGE_AFTER_DAYS", "FOLDMIND_PURGE_AFTER_DAYS"),
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -265,10 +270,11 @@ class APISettings(BaseSettings):
         )
 
     @property
-    def required_document_profile_prompt_version(self) -> str:
+    def required_document_signal_extraction_prompt_version(self) -> str:
         return _required_text(
-            self.document_profile_prompt_version,
-            "FOLDMIND_DOCUMENT_PROFILE_PROMPT_VERSION is required for document profiling.",
+            self.document_signal_extraction_prompt_version,
+            "FOLDMIND_DOCUMENT_SIGNAL_EXTRACTION_PROMPT_VERSION is required for "
+            "document signal extraction.",
         )
 
     @property

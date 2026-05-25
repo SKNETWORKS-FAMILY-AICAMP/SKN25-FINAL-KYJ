@@ -1,1 +1,0 @@
-"""Specialized assistant agent implementations."""

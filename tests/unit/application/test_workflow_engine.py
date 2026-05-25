@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 
 from foldmind_ai_core.core.application.workflows.engine import WorkflowEngine
@@ -14,13 +15,13 @@ from foldmind_ai_core.core.application.workflows.state.plan import (
     WorkflowPlan,
 )
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.generation.results import GeneratedTextResult
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.application.models.generation import GeneratedTextResult
+from foldmind_ai_core.core.domain.models.host_actions import (
     CreateFolderInput,
     HostAction,
     HostActionType,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.tasks import (
     TaskAnalysis,
     TaskContext,
     TaskFinalResult,
@@ -36,7 +37,7 @@ class FakePlanningAgent:
         self.metadata: list[dict[str, object]] = []
         self.context_ids: list[tuple[str | None, str | None]] = []
 
-    def plan(self, query):
+    async def plan(self, query):
         self.metadata.append(dict(query.request_context.metadata))
         self.context_ids.append(
             (query.request_context.document_id, query.request_context.folder_id)
@@ -113,7 +114,7 @@ class WorkflowEngineTests(unittest.TestCase):
             host_action_results=HostActionResultService(),
         )
 
-        engine.replan(state)
+        asyncio.run(engine.replan(state))
 
         self.assertFalse(state.needs_replan)
         self.assertIsNone(state.retry_action_id)

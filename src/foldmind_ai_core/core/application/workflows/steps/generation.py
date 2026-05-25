@@ -2,28 +2,28 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from foldmind_ai_core.core.application.workflows.state.execution import (
-    StepOutcome,
-    WorkflowArtifactName,
-)
-from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.application.workflows.option_values import (
-    instruction_option,
-    normalized_string_value,
-)
-from foldmind_ai_core.core.application.services.prompts import (
+from foldmind_ai_core.core.application.prompts import (
     PROMPT_ANSWER_GENERATION,
     PROMPT_DRAFT_GENERATION,
     PROMPT_IDEAS_EXPLORATION,
     PROMPT_SUMMARIZATION,
 )
-from foldmind_ai_core.core.domain.models.generation.results import (
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
+from foldmind_ai_core.core.application.workflows.option_values import (
+    instruction_option,
+    normalized_string_value,
+)
+from foldmind_ai_core.core.application.workflows.state.execution import (
+    StepOutcome,
+    WorkflowArtifactName,
+)
+from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
+from foldmind_ai_core.core.application.models.generation import (
     AssistantClarification,
     DraftResult,
     GeneratedTextResult,
 )
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery
-from foldmind_ai_core.core.domain.models.retrieval.results import RetrievalResult
+from foldmind_ai_core.core.application.models.retrieval import RetrievalResult
 from foldmind_ai_core.shared.types import JsonObject
 
 if TYPE_CHECKING:
@@ -71,13 +71,13 @@ def synthesize_report(
     )
 
 
-def answer_question(
+async def answer_question(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     _query: RetrievalQuery,
     options: JsonObject,
 ) -> StepOutcome:
-    result = ctx.context_generator.generate(
+    result = await ctx.context_generator.generate(
         prompt_name=PROMPT_ANSWER_GENERATION,
         instruction=instruction_option(options),
         citations=ctx.artifacts.document_retrieval(state),
@@ -90,13 +90,13 @@ def answer_question(
     )
 
 
-def summarize_documents(
+async def summarize_documents(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     _query: RetrievalQuery,
     options: JsonObject,
 ) -> StepOutcome:
-    result = ctx.context_generator.generate(
+    result = await ctx.context_generator.generate(
         prompt_name=PROMPT_SUMMARIZATION,
         instruction=instruction_option(options),
         citations=ctx.artifacts.document_retrieval(state),
@@ -109,13 +109,13 @@ def summarize_documents(
     )
 
 
-def generate_draft(
+async def generate_draft(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     _query: RetrievalQuery,
     options: JsonObject,
 ) -> StepOutcome:
-    generated = ctx.context_generator.generate(
+    generated = await ctx.context_generator.generate(
         prompt_name=PROMPT_DRAFT_GENERATION,
         instruction=instruction_option(options),
         citations=ctx.artifacts.document_retrieval(state),
@@ -129,13 +129,13 @@ def generate_draft(
     )
 
 
-def explore_ideas(
+async def explore_ideas(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     _query: RetrievalQuery,
     options: JsonObject,
 ) -> StepOutcome:
-    result = ctx.context_generator.generate(
+    result = await ctx.context_generator.generate(
         prompt_name=PROMPT_IDEAS_EXPLORATION,
         instruction=instruction_option(options),
         citations=ctx.artifacts.document_retrieval(state),

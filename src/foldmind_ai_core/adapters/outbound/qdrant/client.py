@@ -3,12 +3,13 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from qdrant_client import QdrantClient, models
 
 from foldmind_ai_core.adapters.outbound.qdrant.settings import QdrantSettings
-from foldmind_ai_core.core.application.queries.retrieval import TimestampRange
+from foldmind_ai_core.core.application.errors import ProviderCallError
 from foldmind_ai_core.shared.internal_ids import stable_internal_id
 from foldmind_ai_core.shared.types import JsonObject, Metadata, Vector
 from foldmind_ai_core.shared.validation import InvalidInputError, require_non_blank
@@ -62,6 +63,11 @@ class QdrantCollectionClient:
         self._ensure_collection()
         self._ensure_payload_indexes()
 
+    def close(self) -> None:
+        close = getattr(self._client, "close", None)
+        if close is not None:
+            close()
+
     @property
     def collection_name(self) -> str:
         return self.config.collection_name
@@ -69,13 +75,16 @@ class QdrantCollectionClient:
     def _ensure_collection(self) -> None:
         if self._collection_exists():
             return
-        self._client.create_collection(
-            collection_name=self.config.collection_name,
-            vectors_config=self._models.VectorParams(
-                size=self.config.vector_size,
-                distance=self._distance(),
-            ),
-        )
+        try:
+            self._client.create_collection(
+                collection_name=self.config.collection_name,
+                vectors_config=self._models.VectorParams(
+                    size=self.config.vector_size,
+                    distance=self._distance(),
+                ),
+            )
+        except Exception as exc:
+            raise ProviderCallError("Qdrant collection setup failed.") from exc
 
     def _collection_exists(self) -> bool:
         if hasattr(self._client, "collection_exists"):
@@ -103,11 +112,14 @@ class QdrantCollectionClient:
             return
         for field_name in self.config.payload_indexes:
             schema = self._payload_schema(field_name)
-            self._client.create_payload_index(
-                collection_name=self.config.collection_name,
-                field_name=field_name,
-                field_schema=schema,
-            )
+            try:
+                self._client.create_payload_index(
+                    collection_name=self.config.collection_name,
+                    field_name=field_name,
+                    field_schema=schema,
+                )
+            except Exception as exc:
+                raise ProviderCallError("Qdrant payload index setup failed.") from exc
 
     def _payload_schema(self, field_name: str) -> Any:
         if field_name in {"created_at", "updated_at"} and hasattr(
@@ -119,13 +131,22 @@ class QdrantCollectionClient:
 
     def upsert_points(self, points: list[Any]) -> None:
         if points:
-            self._client.upsert(collection_name=self.config.collection_name, points=points)
+            try:
+                self._client.upsert(
+                    collection_name=self.config.collection_name,
+                    points=points,
+                )
+            except Exception as exc:
+                raise ProviderCallError("Qdrant point upsert failed.") from exc
 
     def delete_by_filter(self, qdrant_filter: Any) -> None:
-        self._client.delete(
-            collection_name=self.config.collection_name,
-            points_selector=self._models.FilterSelector(filter=qdrant_filter),
-        )
+        try:
+            self._client.delete(
+                collection_name=self.config.collection_name,
+                points_selector=self._models.FilterSelector(filter=qdrant_filter),
+            )
+        except Exception as exc:
+            raise ProviderCallError("Qdrant point delete failed.") from exc
 
     def search_points(
         self,
@@ -136,24 +157,27 @@ class QdrantCollectionClient:
     ) -> list[Any]:
         validate_vector(query_vector)
         validate_top_k(top_k)
-        if hasattr(self._client, "query_points"):
-            response = self._client.query_points(
-                collection_name=self.config.collection_name,
-                query=query_vector,
-                query_filter=qdrant_filter,
-                limit=top_k,
-                with_payload=True,
+        try:
+            if hasattr(self._client, "query_points"):
+                response = self._client.query_points(
+                    collection_name=self.config.collection_name,
+                    query=query_vector,
+                    query_filter=qdrant_filter,
+                    limit=top_k,
+                    with_payload=True,
+                )
+                return list(getattr(response, "points", response))
+            return list(
+                self._client.search(
+                    collection_name=self.config.collection_name,
+                    query_vector=query_vector,
+                    query_filter=qdrant_filter,
+                    limit=top_k,
+                    with_payload=True,
+                )
             )
-            return list(getattr(response, "points", response))
-        return list(
-            self._client.search(
-                collection_name=self.config.collection_name,
-                query_vector=query_vector,
-                query_filter=qdrant_filter,
-                limit=top_k,
-                with_payload=True,
-            )
-        )
+        except Exception as exc:
+            raise ProviderCallError("Qdrant point search failed.") from exc
 
     def point(
         self,
@@ -189,8 +213,8 @@ class QdrantCollectionClient:
         folder_ids: tuple[str, ...] = (),
         owner_kind: str | None = None,
         signal_type: str | None = None,
-        created_at: TimestampRange | None = None,
-        updated_at: TimestampRange | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
         metadata_filter: Metadata | None = None,
     ) -> Any:
         must = []
@@ -216,12 +240,14 @@ class QdrantCollectionClient:
                         match=self._models.MatchAny(any=list(values)),
                     )
                 )
-        for field_name, timestamp_range in (
+        for field_name, timestamp in (
             ("created_at", created_at),
             ("updated_at", updated_at),
         ):
-            if timestamp_range is not None:
-                must.append(self._range_condition(field_name, timestamp_range))
+            if timestamp is not None:
+                must.append(
+                    self._match_value_condition(field_name, timestamp.isoformat())
+                )
         for key, metadata_value in (metadata_filter or {}).items():
             must.append(self._match_value_condition(f"metadata.{key}", metadata_value))
         return self._models.Filter(must=must)
@@ -231,23 +257,6 @@ class QdrantCollectionClient:
             key=field_name,
             match=self._models.MatchValue(value=value),
         )
-
-    def _range_condition(self, field_name: str, timestamp_range: TimestampRange) -> Any:
-        range_values = {
-            key: value
-            for key in ("gt", "gte", "lt", "lte")
-            if (value := getattr(timestamp_range, key)) is not None
-        }
-        if hasattr(self._models, "DatetimeRange"):
-            return self._models.FieldCondition(
-                key=field_name,
-                datetime_range=self._models.DatetimeRange(**range_values),
-            )
-        return self._models.FieldCondition(
-            key=field_name,
-            range=self._models.Range(**range_values),
-        )
-
 
 def validate_parallel(items: Sequence[object], vectors: Sequence[Vector]) -> None:
     if len(items) != len(vectors):

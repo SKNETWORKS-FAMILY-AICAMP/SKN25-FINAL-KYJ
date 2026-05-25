@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, cast
 
 from foldmind_ai_core.adapters.outbound.neo4j.mappers import (
     document_from_node,
     matches_scope,
 )
-from foldmind_ai_core.core.application.queries.retrieval import SearchScope
-from foldmind_ai_core.core.application.queries.scope_matching import (
-    sort_by_timestamp_scope,
-)
-from foldmind_ai_core.core.domain.models.retrieval.results import (
+from foldmind_ai_core.core.application.models.search import SearchScope
+from foldmind_ai_core.core.application.models.retrieval import (
     DocumentRetrievalResult,
     RetrievedDocument,
-    RetrievedFolder,
 )
+from foldmind_ai_core.core.application.search_scope import (
+    sort_by_timestamp_scope,
+)
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
+from foldmind_ai_core.shared.types import Metadata
 
 _SIGNAL_WEIGHTS = {
     "DOCUMENT_TITLE": 0.8,
@@ -94,7 +95,7 @@ def folders_for_documents(
     *,
     tenant: str,
     document_ids: tuple[str, ...],
-) -> dict[str, tuple[RetrievedFolder, ...]]:
+) -> dict[str, tuple[SourceFolder, ...]]:
     if not document_ids:
         return {}
     records = session.run(
@@ -122,7 +123,7 @@ def folders_for_documents(
         tenant=tenant,
         document_ids=list(document_ids),
     )
-    folders_by_document: dict[str, tuple[RetrievedFolder, ...]] = {}
+    folders_by_document: dict[str, tuple[SourceFolder, ...]] = {}
     for record in records:
         document_id = _record_text(record, "document_id")
         if not document_id:
@@ -183,26 +184,14 @@ def _query_document_ids_for_timestamps(
 ) -> set[str]:
     conditions = ["d.tenant = $tenant"]
     parameters: dict[str, object] = {"tenant": tenant}
-    for field_name, timestamp_range in (
+    for field_name, timestamp in (
         ("created_at", scope.created_at),
         ("updated_at", scope.updated_at),
     ):
-        if timestamp_range is None:
+        if timestamp is None:
             continue
-        for operator_name, cypher_operator in (
-            ("gt", ">"),
-            ("gte", ">="),
-            ("lt", "<"),
-            ("lte", "<="),
-        ):
-            value = getattr(timestamp_range, operator_name)
-            if value is None:
-                continue
-            parameter_name = f"{field_name}_{operator_name}"
-            conditions.append(
-                f"datetime(d.{field_name}) {cypher_operator} datetime(${parameter_name})"
-            )
-            parameters[parameter_name] = value
+        conditions.append(f"datetime(d.{field_name}) = datetime(${field_name})")
+        parameters[field_name] = timestamp.isoformat()
     records = session.run(
         f"""
         MATCH (d:Document)
@@ -336,20 +325,20 @@ def _graph_search_queries() -> tuple[tuple[str, str], ...]:
     )
 
 
-def _folders_from_records(value: object) -> tuple[RetrievedFolder, ...]:
+def _folders_from_records(value: object) -> tuple[SourceFolder, ...]:
     if not isinstance(value, list | tuple):
         return ()
-    folders: list[RetrievedFolder] = []
+    folders: list[SourceFolder] = []
     for item in value:
         if not isinstance(item, dict):
             continue
         tenant = _record_text(item, "tenant")
         folder_id = _record_text(item, "folder_id")
-        source_version = _record_text(item, "source_version", default="")
-        if not tenant or not folder_id:
+        source_version = _record_text(item, "source_version")
+        if not tenant or not folder_id or not source_version:
             continue
         folders.append(
-            RetrievedFolder(
+            SourceFolder(
                 tenant=tenant,
                 folder_id=folder_id,
                 source_version=source_version,
@@ -373,6 +362,12 @@ def _record_optional_text(item: dict[str, object], key: str) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _metadata_json_dict(value: object) -> Metadata:
+    if not isinstance(value, dict):
+        return {}
+    return cast(Metadata, dict(value))
 
 
 def _record_text(

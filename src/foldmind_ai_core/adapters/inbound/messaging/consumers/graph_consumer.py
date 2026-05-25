@@ -2,78 +2,84 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from foldmind_ai_core.adapters.inbound.messaging.message_codec import (
+    delete_document_projection_command_from_outbox,
+    delete_folder_projection_command_from_outbox,
+    invalidate_folder_signals_command_from_outbox,
+    project_document_command_from_outbox,
+    project_document_folder_relations_command_from_outbox,
+    project_folder_command_from_outbox,
+    project_folder_signals_command_from_outbox,
+)
 from foldmind_ai_core.core.application.ports.inbound.projection import (
-    DeleteDocumentGraphInboundPort,
-    DeleteFolderGraphInboundPort,
-    InvalidateFolderSignalsGraphInboundPort,
-    ProjectDocumentFolderRelationsGraphInboundPort,
-    ProjectDocumentGraphInboundPort,
-    ProjectFolderGraphInboundPort,
-    ProjectFolderSignalsGraphInboundPort,
+    GraphProjectionServicePort,
 )
-from foldmind_ai_core.core.domain.models.indexing.outbox import OutboxEvent
-from foldmind_ai_core.adapters.inbound.messaging.mappers.outbox import (
-    delete_document_projection_command,
-    delete_folder_projection_command,
-    invalidate_folder_signals_command,
-    project_document_folder_relations_command,
-    project_document_command,
-    project_folder_command,
-    project_folder_signals_command,
-)
+from foldmind_ai_core.core.domain.models.outbox import OutboxEvent
 
 
 @dataclass(slots=True)
 class DocumentGraphIndexedConsumer:
-    use_case: ProjectDocumentGraphInboundPort
+    service: GraphProjectionServicePort
 
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
-        self.use_case.execute(project_document_command(event))
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
+        await self.service.project_document_graph(
+            project_document_command_from_outbox(event)
+        )
 
 
 @dataclass(slots=True)
 class DocumentGraphFolderRelationsIndexedConsumer:
-    use_case: ProjectDocumentFolderRelationsGraphInboundPort
+    service: GraphProjectionServicePort
 
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
-        self.use_case.execute(project_document_folder_relations_command(event))
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
+        await self.service.project_document_folder_relations(
+            project_document_folder_relations_command_from_outbox(event)
+        )
 
 
 @dataclass(slots=True)
 class DocumentGraphDeletedConsumer:
-    use_case: DeleteDocumentGraphInboundPort
+    service: GraphProjectionServicePort
 
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
-        self.use_case.execute(delete_document_projection_command(event))
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
+        await self.service.delete_document_graph(
+            delete_document_projection_command_from_outbox(event)
+        )
 
 
 @dataclass(slots=True)
 class FolderGraphIndexedConsumer:
-    use_case: ProjectFolderGraphInboundPort
+    service: GraphProjectionServicePort
 
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
-        self.use_case.execute(project_folder_command(event))
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
+        await self.service.project_folder_graph(project_folder_command_from_outbox(event))
 
 
 @dataclass(slots=True)
 class FolderSignalsGraphIndexedConsumer:
-    use_case: ProjectFolderSignalsGraphInboundPort
+    service: GraphProjectionServicePort
 
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
-        self.use_case.execute(project_folder_signals_command(event))
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
+        await self.service.project_folder_signals(
+            project_folder_signals_command_from_outbox(event)
+        )
 
 
 @dataclass(slots=True)
 class FolderSignalsGraphInvalidatedConsumer:
-    use_case: InvalidateFolderSignalsGraphInboundPort
+    service: GraphProjectionServicePort
 
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
-        self.use_case.execute(invalidate_folder_signals_command(event))
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
+        await self.service.invalidate_folder_signals(
+            invalidate_folder_signals_command_from_outbox(event)
+        )
 
 
 @dataclass(slots=True)
 class FolderGraphDeletedConsumer:
-    use_case: DeleteFolderGraphInboundPort
+    service: GraphProjectionServicePort
 
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
-        self.use_case.execute(delete_folder_projection_command(event))
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
+        await self.service.delete_folder_graph(
+            delete_folder_projection_command_from_outbox(event)
+        )

@@ -4,25 +4,25 @@ import json
 from typing import Any
 
 from foldmind_ai_core.adapters.outbound.neo4j.models import (
-    Neo4jDocumentSignalNodeRecord,
     Neo4jDocumentNodeRecord,
+    Neo4jDocumentSignalNodeRecord,
     Neo4jFolderNodeRecord,
     Neo4jFolderSignalNodeRecord,
     Neo4jRelationshipRecord,
 )
-from foldmind_ai_core.core.application.projections.graph import (
-    DocumentRelationshipProjection,
-    DocumentSignalProjection,
-    DocumentSignalNodeProjection,
-    FolderRelationshipProjection,
-    FolderSignalNodeProjection,
-    FolderSignalProjection,
-)
-from foldmind_ai_core.core.application.queries.retrieval import SearchScope
-from foldmind_ai_core.core.application.queries.scope_matching import (
+from foldmind_ai_core.core.application.models.search import SearchScope
+from foldmind_ai_core.core.application.search_scope import (
     matches_timestamp_scope,
 )
-from foldmind_ai_core.core.domain.models.retrieval.results import RetrievedDocument
+from foldmind_ai_core.core.application.models.retrieval import RetrievedDocument
+from foldmind_ai_core.core.domain.models.document_index_state import DocumentIndexState
+from foldmind_ai_core.core.domain.models.document_signals import DocumentSignal
+from foldmind_ai_core.core.domain.models.document_sources import DocumentSourceState
+from foldmind_ai_core.core.domain.models.folder_signals import FolderSignal
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
+from foldmind_ai_core.core.domain.services.folder_projection_digest_service import (
+    FolderProjectionDigestService,
+)
 
 
 def document_from_node(node: Any) -> RetrievedDocument:
@@ -43,8 +43,8 @@ def document_node_from_neo4j(node: Any) -> Neo4jDocumentNodeRecord:
         tenant=_required_node_text(node, "tenant"),
         document_id=_required_node_text(node, "document_id"),
         document_type=_optional_node_text(node, "document_type", default="") or None,
-        source_version=_optional_node_text(node, "source_version", default=""),
-        content_digest=_optional_node_text(node, "content_digest", default=""),
+        source_version=_required_node_text(node, "source_version"),
+        content_digest=_required_node_text(node, "content_digest"),
         created_at=_required_node_text(node, "created_at"),
         updated_at=_required_node_text(node, "updated_at"),
         label=_optional_node_text(node, "label", default="") or None,
@@ -67,41 +67,44 @@ def document_node_from_neo4j(node: Any) -> Neo4jDocumentNodeRecord:
     )
 
 
-def document_relationship_node_from_projection(
-    projection: DocumentRelationshipProjection,
+def document_relationship_node_from_source(
+    document: DocumentSourceState,
 ) -> Neo4jDocumentNodeRecord:
     return Neo4jDocumentNodeRecord(
-        tenant=projection.tenant,
-        document_id=projection.document_id,
-        document_type=projection.document_type,
-        source_version=projection.source_version,
-        content_digest=projection.content_digest,
-        created_at=projection.created_at,
-        updated_at=projection.updated_at,
+        tenant=document.tenant,
+        document_id=document.document_id,
+        document_type=document.document_type,
+        source_version=document.source_version,
+        content_digest=document.content_digest,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
     )
 
 
-def document_signal_node_from_projection(
-    projection: DocumentSignalProjection,
+def document_signal_node_from_source(
+    document: DocumentSourceState,
+    document_index: DocumentIndexState,
 ) -> Neo4jDocumentNodeRecord:
     return Neo4jDocumentNodeRecord(
-        tenant=projection.tenant,
-        document_id=projection.document_id,
-        document_type=projection.document_type,
-        source_version=projection.source_version,
-        content_digest=projection.content_digest,
-        created_at=projection.created_at,
-        updated_at=projection.updated_at,
-        label=projection.title,
-        document_index_input_digest=projection.document_index_input_digest,
-        document_signal_input_digest=projection.document_signal_input_digest,
-        signal_generation_version=projection.signal_generation_version,
-        metadata_json=json.dumps(projection.metadata, ensure_ascii=False),
+        tenant=document.tenant,
+        document_id=document.document_id,
+        document_type=document.document_type,
+        source_version=document.source_version,
+        content_digest=document.content_digest,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+        label=document.title,
+        document_index_input_digest=document_index.document_index_input_digest,
+        document_signal_input_digest=document_index.document_signal_input_digest,
+        signal_generation_version=document_index.signal_generation_version,
+        metadata_json=json.dumps(document.metadata, ensure_ascii=False),
     )
 
 
-def document_signal_record_from_projection(
-    signal: DocumentSignalNodeProjection,
+def document_signal_record_from_source(
+    signal: DocumentSignal,
+    *,
+    content_digest: str,
 ) -> Neo4jDocumentSignalNodeRecord:
     return Neo4jDocumentSignalNodeRecord(
         signal_id=signal.signal_id,
@@ -111,7 +114,7 @@ def document_signal_record_from_projection(
         text=signal.text,
         document_id=signal.document_id,
         source_version=signal.source_version,
-        content_digest=signal.content_digest,
+        content_digest=content_digest,
         document_signal_input_digest=signal.document_signal_input_digest,
         signal_generation_version=signal.signal_generation_version,
         attributes_json=json.dumps(signal.attributes, ensure_ascii=False),
@@ -124,8 +127,8 @@ def document_signal_record_from_projection(
     )
 
 
-def folder_signal_record_from_projection(
-    signal: FolderSignalNodeProjection,
+def folder_signal_record_from_source(
+    signal: FolderSignal,
 ) -> Neo4jFolderSignalNodeRecord:
     return Neo4jFolderSignalNodeRecord(
         signal_id=signal.signal_id,
@@ -148,22 +151,26 @@ def folder_signal_record_from_projection(
     )
 
 
-def folder_node_from_projection(
-    projection: FolderRelationshipProjection,
+def folder_node_from_source(
+    folder: SourceFolder,
 ) -> Neo4jFolderNodeRecord:
+    folder_index_input_digest = FolderProjectionDigestService().folder_index_input_digest(
+        folder_id=folder.folder_id,
+        folder=folder,
+    )
     return Neo4jFolderNodeRecord(
-        tenant=projection.tenant,
-        folder_id=projection.folder_id,
-        label=projection.name,
-        source_version=projection.source_version,
-        folder_index_input_digest=projection.folder_index_input_digest,
-        created_at=projection.created_at,
-        updated_at=projection.updated_at,
+        tenant=folder.tenant,
+        folder_id=folder.folder_id,
+        label=folder.name,
+        source_version=folder.source_version,
+        folder_index_input_digest=folder_index_input_digest,
+        created_at=folder.created_at,
+        updated_at=folder.updated_at,
         projection_state="active",
-        path_snapshot=projection.path,
-        parent_folder_id=projection.parent_folder_id,
-        description=projection.description,
-        metadata_json=json.dumps(projection.metadata, ensure_ascii=False),
+        path_snapshot=folder.path,
+        parent_folder_id=folder.parent_folder_id,
+        description=folder.description,
+        metadata_json=json.dumps(folder.metadata, ensure_ascii=False),
     )
 
 
@@ -171,7 +178,7 @@ def folder_reference_node(*, tenant: str, folder_id: str) -> Neo4jFolderNodeReco
     return Neo4jFolderNodeRecord(tenant=tenant, folder_id=folder_id)
 
 
-def _document_signal_evidence_json(signal: DocumentSignalNodeProjection) -> str:
+def _document_signal_evidence_json(signal: DocumentSignal) -> str:
     return json.dumps(
         tuple(
             {
@@ -189,20 +196,25 @@ def _document_signal_evidence_json(signal: DocumentSignalNodeProjection) -> str:
 
 def signal_relationship(
     *,
-    projection: DocumentSignalProjection,
-    signal: DocumentSignalNodeProjection,
+    document: DocumentSourceState,
+    document_index: DocumentIndexState,
+    signal: DocumentSignal,
 ) -> Neo4jRelationshipRecord:
     return Neo4jRelationshipRecord(
-        tenant=projection.tenant,
+        tenant=document.tenant,
         confidence=signal.confidence if signal.confidence is not None else 1.0,
         metadata_json=json.dumps(
             {
                 "signal_id": signal.signal_id,
-                "source_version": projection.source_version,
-                "content_digest": projection.content_digest,
-                "document_signal_input_digest": projection.document_signal_input_digest,
-                "signal_generation_version": projection.signal_generation_version,
-                **projection.metadata,
+                "source_version": document.source_version,
+                "content_digest": document.content_digest,
+                "document_signal_input_digest": (
+                    document_index.document_signal_input_digest
+                ),
+                "signal_generation_version": (
+                    document_index.signal_generation_version
+                ),
+                **document.metadata,
             },
             ensure_ascii=False,
         ),
@@ -211,18 +223,20 @@ def signal_relationship(
 
 def folder_signal_relationship(
     *,
-    projection: FolderSignalProjection,
-    signal: FolderSignalNodeProjection,
+    folder: SourceFolder,
+    folder_signal_input_digest: str,
+    signal_generation_version: str,
+    signal: FolderSignal,
 ) -> Neo4jRelationshipRecord:
     return Neo4jRelationshipRecord(
-        tenant=projection.tenant,
+        tenant=folder.tenant,
         confidence=signal.confidence if signal.confidence is not None else 1.0,
         metadata_json=json.dumps(
             {
                 "signal_id": signal.signal_id,
-                "source_version": projection.source_version,
-                "folder_signal_input_digest": projection.folder_signal_input_digest,
-                "signal_generation_version": projection.signal_generation_version,
+                "source_version": folder.source_version,
+                "folder_signal_input_digest": folder_signal_input_digest,
+                "signal_generation_version": signal_generation_version,
             },
             ensure_ascii=False,
         ),

@@ -1,28 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.domain.models.host_actions import (
     HostAction,
     HostActionResult,
     HostActionResultType,
     HostActionStatus,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskStatus
-from foldmind_ai_core.core.domain.services.workflow import (
-    apply_successful_host_action_output,
-    host_action_status_for_result,
-    is_completed_host_action_status,
-    is_host_action_attempt_result,
-    is_host_action_retry_result,
-    is_pending_host_action,
-    should_schedule_host_action,
-)
+from foldmind_ai_core.core.domain.models.tasks import TaskStatus
+from foldmind_ai_core.core.domain.services.workflow_domain_service import WorkflowDomainService
 
 
 @dataclass(slots=True)
 class HostActionResultService:
+    workflow_rules: WorkflowDomainService = field(default_factory=WorkflowDomainService)
+
     def apply(self, state: WorkflowState, result: HostActionResult) -> WorkflowState:
         state.last_action_result = result
         state.needs_replan = False
@@ -38,15 +32,18 @@ class HostActionResultService:
             None,
         )
         if action is not None:
-            if is_host_action_attempt_result(result):
+            if self.workflow_rules.is_host_action_attempt_result(result):
                 action.attempts += 1
-            action.status = host_action_status_for_result(action, result)
+            action.status = self.workflow_rules.host_action_status_for_result(
+                action,
+                result,
+            )
             state.task.current_action_id = action.action_id
             state.needs_replan = result.outcome == HostActionResultType.MODIFIED
-            if should_schedule_host_action(action, result):
+            if self.workflow_rules.should_schedule_host_action(action, result):
                 state.retry_action_id = action.action_id
             if result.outcome == HostActionResultType.SUCCEEDED:
-                output_error = apply_successful_host_action_output(
+                output_error = self.workflow_rules.apply_successful_host_action_output(
                     action,
                     state.task.host_actions,
                     result,
@@ -59,7 +56,7 @@ class HostActionResultService:
             action
             for action in state.pending_actions
             if action.action_id != result.action_id
-            and is_pending_host_action(action)
+            and self.workflow_rules.is_pending_host_action(action)
         ]
         self.schedule_next_action(state)
         if state.pending_actions:
@@ -109,8 +106,9 @@ class HostActionResultService:
             state.retry_action_id is not None or pending_ready_action is not None
         )
         if has_pending_host_execution:
-            retry_requested = state.retry_action_id is not None and is_host_action_retry_result(
-                result
+            retry_requested = (
+                state.retry_action_id is not None
+                and self.workflow_rules.is_host_action_retry_result(result)
             )
             state.task.status = TaskStatus.READY_FOR_HOST_ACTION
             if pending_ready_action is not None:
@@ -148,7 +146,9 @@ class HostActionResultService:
             state.task.status = TaskStatus.READY_FOR_HOST_ACTION
             state.task.analysis.message = (
                 "Host action retry scheduled."
-                if is_host_action_retry_result(state.last_action_result)
+                if self.workflow_rules.is_host_action_retry_result(
+                    state.last_action_result
+                )
                 else "Task is ready for host action."
             )
             break
@@ -167,21 +167,21 @@ class HostActionResultService:
     def schedule_next_action(self, state: WorkflowState) -> None:
         state.pending_actions = []
         for action in state.task.host_actions:
-            if is_completed_host_action_status(action.status):
+            if self.workflow_rules.is_completed_host_action_status(action.status):
                 continue
             if (
                 action.status == HostActionStatus.PROPOSED
                 and not action.policy.requires_confirmation
             ):
                 action.status = HostActionStatus.READY
-            if not is_pending_host_action(action):
+            if not self.workflow_rules.is_pending_host_action(action):
                 continue
             state.pending_actions.append(action)
             return
 
     def _all_host_actions_completed(self, state: WorkflowState) -> bool:
         return bool(state.task.host_actions) and all(
-            is_completed_host_action_status(action.status)
+            self.workflow_rules.is_completed_host_action_status(action.status)
             for action in state.task.host_actions
         )
 

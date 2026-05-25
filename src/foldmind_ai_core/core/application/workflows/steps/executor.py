@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from inspect import isawaitable
+from typing import Protocol
 
-from foldmind_ai_core.core.application.capabilities.generation import (
-    ContextGenerationCapability,
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
+from foldmind_ai_core.core.application.services.retrieval.document_search_service import (
+    DocumentSearchService,
 )
-from foldmind_ai_core.core.application.capabilities.retrieval import (
-    DocumentSearchCapability,
-    FolderRecommendationCapability,
-    FolderSearchCapability,
-    SignalSearchCapability,
+from foldmind_ai_core.core.application.services.retrieval.folder_search_service import (
+    FolderSearchService,
 )
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery
-from foldmind_ai_core.core.application.services.folder_recommendation_source_resolver import (
-    FolderRecommendationSourceResolver,
+from foldmind_ai_core.core.application.services.retrieval.signal_search_service import (
+    SignalSearchService,
 )
 from foldmind_ai_core.core.application.workflows.artifacts.registry import (
     WorkflowArtifactRegistry,
@@ -56,21 +55,41 @@ from foldmind_ai_core.core.application.workflows.steps.retrieval import (
     synthesize_signals,
 )
 from foldmind_ai_core.core.application.workflows.steps.specs import STEP_SPECS
+from foldmind_ai_core.core.application.models.generation import GeneratedTextResult
+from foldmind_ai_core.core.application.models.retrieval import RetrievalResult
+from foldmind_ai_core.core.domain.models.tasks import TaskJob
 from foldmind_ai_core.shared.types import JsonObject
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskJob
+
+from ...services.recommendation.folder_recommendation_service import (
+    FolderRecommendationService,
+)
+from ...services.recommendation.folder_recommendation_source_resolver import (
+    FolderRecommendationSourceResolver,
+)
+
+
+class ContextGenerator(Protocol):
+    async def generate(
+        self,
+        *,
+        prompt_name: str,
+        instruction: str,
+        citations: list[RetrievalResult],
+    ) -> GeneratedTextResult:
+        ...
 
 
 @dataclass(slots=True)
 class WorkflowStepExecutor:
-    find_documents: DocumentSearchCapability
-    find_folders: FolderSearchCapability
-    recommend_folder: FolderRecommendationCapability
+    document_search: DocumentSearchService
+    signal_search: SignalSearchService
+    folder_search: FolderSearchService
+    folder_recommendation: FolderRecommendationService
     folder_recommendation_sources: FolderRecommendationSourceResolver
-    context_generator: ContextGenerationCapability
+    context_generator: ContextGenerator
     host_action_builder: HostActionBuilder
     artifacts: WorkflowArtifactRegistry
     host_action_results: HostActionResultService
-    find_signals: SignalSearchCapability
     _step_functions: dict[WorkflowActionType, WorkflowStepFunction] = field(
         init=False,
         repr=False,
@@ -101,7 +120,7 @@ class WorkflowStepExecutor:
             WorkflowActionType.REQUEST_CLARIFICATION: request_clarification,
         }
 
-    def execute(
+    async def execute(
         self,
         state: WorkflowState,
         action_type: WorkflowActionType,
@@ -114,15 +133,15 @@ class WorkflowStepExecutor:
         if spec is None or step_function is None:
             raise RuntimeError(f"Unsupported workflow action: {action_type}")
 
-        outcome = step_function(self, state, step_query, options)
+        maybe_outcome = step_function(self, state, step_query, options)
+        outcome = await maybe_outcome if isawaitable(maybe_outcome) else maybe_outcome
         if action_type == WorkflowActionType.PLAN_HOST_ACTIONS:
             for action in state.task.host_actions:
                 if action.job_id is None:
                     action.job_id = job.job_id
         if tuple(outcome.artifacts) != spec.writes:
             raise RuntimeError(
-                f"{action_type} wrote {tuple(outcome.artifacts)}, "
-                f"expected {spec.writes}."
+                f"{action_type} wrote {tuple(outcome.artifacts)}, expected {spec.writes}."
             )
         self.artifacts.record_step_outcome(state, job, outcome, spec.output)
         job.metadata["artifacts_read"] = [artifact.value for artifact in spec.reads]
@@ -131,5 +150,5 @@ class WorkflowStepExecutor:
 
 WorkflowStepFunction = Callable[
     [WorkflowStepExecutor, WorkflowState, RetrievalQuery, JsonObject],
-    StepOutcome,
+    StepOutcome | Awaitable[StepOutcome],
 ]

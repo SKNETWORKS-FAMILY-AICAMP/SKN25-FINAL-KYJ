@@ -21,17 +21,17 @@ from foldmind_ai_core.adapters.inbound.http.dtos.tasks import (
     TaskAnalysisDTO,
     TaskContextDTO,
     TaskEventDTO,
+    TaskInputEntryDTO,
     TaskJobDTO,
     TaskJobResultDTO,
     TaskOutputDTO,
     TaskOutputMetaDTO,
-    TaskInputEntryDTO,
     TaskSnapshotDTO,
     TaskSnapshotResponse,
 )
 from foldmind_ai_core.adapters.inbound.http.mappers.actions import (
-    action_plan_dto_from_result,
-    host_action_dto_from_result,
+    action_plan_dto_from_domain,
+    host_action_dto_from_domain,
 )
 from foldmind_ai_core.adapters.inbound.http.mappers.transport_values import (
     transport_value,
@@ -42,36 +42,37 @@ from foldmind_ai_core.adapters.inbound.http.mappers.workflow_outputs import (
     document_search_result_dto_from_result,
     draft_result_dto_from_result,
     folder_recommendation_result_dto_from_result,
-    generated_text_response_from_result,
+    generated_text_dto_from_result,
     related_recommendation_result_dto_from_result,
 )
-from foldmind_ai_core.core.application.commands.workflow import (
+from foldmind_ai_core.core.application.models.task_commands import (
     AppendTaskInputCommand,
     CreateTaskCommand,
     GetTaskQuery,
     RemoveTaskInputCommand,
-    TaskRequestContextCommand,
 )
-from foldmind_ai_core.core.application.results.workflow import (
-    ActionPlanResult,
-    AssistantClarificationResult,
-    DocumentRecommendationTaskOutputResult,
-    DocumentSearchTaskOutputResult,
-    DraftTaskOutputResult,
-    FolderRecommendationTaskOutputResult,
-    GeneratedTextTaskOutputResult,
+from foldmind_ai_core.core.application.models.generation import (
+    AssistantClarification,
+    DocumentRecommendationResult,
+    DocumentSearchResult,
+    DraftResult,
+    FolderRecommendationResult,
+    GeneratedTextResult,
+    RelatedRecommendationResult,
+)
+from foldmind_ai_core.core.domain.models.host_actions import ActionPlan
+from foldmind_ai_core.core.application.models.task_results import (
     RecordActionResult,
-    RelatedRecommendationTaskOutputResult,
-    TaskAnalysisResult,
-    TaskContextResult,
-    TaskEventResult,
-    TaskFinalResultResult,
-    TaskJobItemResult,
-    TaskJobResultItemResult,
-    TaskOutputItemResult,
-    TaskInputEntryResult,
-    TaskResult,
-    TaskSnapshotResult,
+)
+from foldmind_ai_core.core.domain.models.tasks import (
+    TaskAnalysis,
+    TaskContext,
+    TaskEvent,
+    TaskFinalResult,
+    TaskInputEntry,
+    TaskJob,
+    TaskJobResult,
+    TaskSnapshot,
 )
 from foldmind_ai_core.shared.validation import (
     InvalidInputError,
@@ -92,64 +93,64 @@ _TaskOutputMapping: TypeAlias = tuple[
 
 _TASK_OUTPUT_MAPPINGS: dict[str, _TaskOutputMapping] = {
     "clarification": (
-        AssistantClarificationResult,
+        AssistantClarification,
         ClarificationOutputDTO,
         assistant_clarification_dto_from_result,
-        "Clarification output requires AssistantClarificationResult result.",
+        "Clarification output requires AssistantClarification.",
     ),
     "document_recommendation": (
-        DocumentRecommendationTaskOutputResult,
+        DocumentRecommendationResult,
         DocumentRecommendationOutputDTO,
         document_recommendation_result_dto_from_result,
-        "Document recommendation output requires DocumentRecommendationTaskOutputResult.",
+        "Document recommendation output requires DocumentRecommendationResult.",
     ),
     "document_search_result": (
-        DocumentSearchTaskOutputResult,
+        DocumentSearchResult,
         DocumentSearchResultOutputDTO,
         document_search_result_dto_from_result,
-        "Document search result output requires DocumentSearchTaskOutputResult.",
+        "Document search result output requires DocumentSearchResult.",
     ),
     "folder_recommendation": (
-        FolderRecommendationTaskOutputResult,
+        FolderRecommendationResult,
         FolderRecommendationOutputDTO,
         folder_recommendation_result_dto_from_result,
-        "Folder recommendation output requires FolderRecommendationTaskOutputResult.",
+        "Folder recommendation output requires FolderRecommendationResult.",
     ),
     "related_recommendation": (
-        RelatedRecommendationTaskOutputResult,
+        RelatedRecommendationResult,
         RelatedRecommendationOutputDTO,
         related_recommendation_result_dto_from_result,
-        "Related recommendation output requires RelatedRecommendationTaskOutputResult.",
+        "Related recommendation output requires RelatedRecommendationResult.",
     ),
     "answer": (
-        GeneratedTextTaskOutputResult,
+        GeneratedTextResult,
         AnswerOutputDTO,
-        generated_text_response_from_result,
-        "Answer output requires GeneratedTextTaskOutputResult.",
+        generated_text_dto_from_result,
+        "Answer output requires GeneratedTextResult.",
     ),
     "summary": (
-        GeneratedTextTaskOutputResult,
+        GeneratedTextResult,
         SummaryOutputDTO,
-        generated_text_response_from_result,
-        "Summary output requires GeneratedTextTaskOutputResult.",
+        generated_text_dto_from_result,
+        "Summary output requires GeneratedTextResult.",
     ),
     "draft": (
-        DraftTaskOutputResult,
+        DraftResult,
         DraftOutputDTO,
         draft_result_dto_from_result,
-        "Draft output requires DraftTaskOutputResult.",
+        "Draft output requires DraftResult.",
     ),
     "ideas": (
-        GeneratedTextTaskOutputResult,
+        GeneratedTextResult,
         IdeasOutputDTO,
-        generated_text_response_from_result,
-        "Ideas output requires GeneratedTextTaskOutputResult.",
+        generated_text_dto_from_result,
+        "Ideas output requires GeneratedTextResult.",
     ),
     "action_plan": (
-        ActionPlanResult,
+        ActionPlan,
         ActionPlanOutputDTO,
-        action_plan_dto_from_result,
-        "Action plan output requires ActionPlanResult.",
+        action_plan_dto_from_domain,
+        "Action plan output requires ActionPlan.",
     ),
 }
 _INTERNAL_TASK_METADATA_KEYS = {"workflow_feedback", "workflow_round"}
@@ -190,8 +191,10 @@ def remove_task_input_command_from_path(
     )
 
 
-def task_snapshot_response_from_result(result: TaskResult) -> TaskSnapshotResponse:
-    return TaskSnapshotResponse(task=task_snapshot_dto_from_result(result.task))
+def task_snapshot_response_from_result(
+    task: TaskSnapshot,
+) -> TaskSnapshotResponse:
+    return TaskSnapshotResponse(task=task_snapshot_dto_from_result(task))
 
 
 def record_action_result_response_from_result(
@@ -203,13 +206,13 @@ def record_action_result_response_from_result(
     )
 
 
-def task_snapshot_dto_from_result(task: TaskSnapshotResult) -> TaskSnapshotDTO:
+def task_snapshot_dto_from_result(task: TaskSnapshot) -> TaskSnapshotDTO:
     return TaskSnapshotDTO(
         task_id=task.task_id,
         tenant=task.tenant,
         request=task.request,
         context=task_context_dto_from_result(task.context),
-        status=task.status,
+        status=task.status.value,
         analysis=task_analysis_dto_from_result(task.analysis),
         inputs=[
             task_input_entry_dto_from_result(task_input)
@@ -222,7 +225,7 @@ def task_snapshot_dto_from_result(task: TaskSnapshotResult) -> TaskSnapshotDTO:
             else None
         ),
         host_actions=[
-            host_action_dto_from_result(action)
+            host_action_dto_from_domain(action)
             for action in task.host_actions
         ],
         error=task.error,
@@ -232,37 +235,37 @@ def task_snapshot_dto_from_result(task: TaskSnapshotResult) -> TaskSnapshotDTO:
     )
 
 
-def task_event_dto_from_result(event: TaskEventResult) -> TaskEventDTO:
+def task_event_dto_from_result(event: TaskEvent) -> TaskEventDTO:
     return TaskEventDTO(
         event_id=event.event_id,
-        event_type=event.event_type,
+        event_type=event.event_type.value,
         message=event.message,
         job_id=event.job_id,
         data=transport_value(event.data),
     )
 
 
-def task_analysis_dto_from_result(analysis: TaskAnalysisResult) -> TaskAnalysisDTO:
+def task_analysis_dto_from_result(analysis: TaskAnalysis) -> TaskAnalysisDTO:
     return TaskAnalysisDTO(message=analysis.message)
 
 
-def task_input_entry_dto_from_result(task_input: TaskInputEntryResult) -> TaskInputEntryDTO:
+def task_input_entry_dto_from_result(task_input: TaskInputEntry) -> TaskInputEntryDTO:
     return TaskInputEntryDTO(
         task_input_id=task_input.task_input_id,
         input_text=task_input.input_text,
         context=task_context_dto_from_result(task_input.context),
         position=task_input.position,
-        status=task_input.status,
+        status=task_input.status.value,
     )
 
 
-def task_job_dto_from_result(job: TaskJobItemResult) -> TaskJobDTO:
+def task_job_dto_from_result(job: TaskJob) -> TaskJobDTO:
     return TaskJobDTO(
         job_id=job.job_id,
         round_index=job.round_index,
         position=job.position,
         job_type=job.job_type,
-        status=job.status,
+        status=job.status.value,
         reason=job.reason,
         input=transport_value(job.input),
         started_at=job.started_at,
@@ -274,7 +277,7 @@ def task_job_dto_from_result(job: TaskJobItemResult) -> TaskJobDTO:
 
 
 def task_job_result_dto_from_result(
-    result: TaskJobResultItemResult,
+    result: TaskJobResult,
 ) -> TaskJobResultDTO:
     return TaskJobResultDTO(
         job_result_id=result.job_result_id,
@@ -284,25 +287,23 @@ def task_job_result_dto_from_result(
     )
 
 
-def task_final_result_dto_from_result(result: TaskFinalResultResult) -> TaskOutputDTO:
+def task_final_result_dto_from_result(result: TaskFinalResult) -> TaskOutputDTO:
     return task_output_dto_from_result(
-        TaskOutputItemResult(
-            output_type=result.result_type,
-            result=result.result,
-            title=result.title,
-            metadata=result.metadata,
-        )
+        output_type=result.result_type.value,
+        result=result.result,
+        title=result.title,
+        metadata=result.metadata,
     )
 
 
-def task_context_from_dto(dto: TaskContextDTO | None) -> TaskRequestContextCommand:
+def task_context_from_dto(dto: TaskContextDTO | None) -> TaskContext:
     if dto is None:
-        return TaskRequestContextCommand(requested_at=resolve_requested_at(None))
+        return TaskContext(requested_at=resolve_requested_at(None))
     if dto.requested_at is None and dto.document_id is None and dto.folder_id is None:
         raise InvalidInputError(
             "context must include requested_at, document_id, or folder_id."
         )
-    return TaskRequestContextCommand(
+    return TaskContext(
         requested_at=(
             require_aware_iso_timestamp(dto.requested_at, "context.requested_at")
             if dto.requested_at is not None
@@ -313,7 +314,7 @@ def task_context_from_dto(dto: TaskContextDTO | None) -> TaskRequestContextComma
     )
 
 
-def task_context_dto_from_result(context: TaskContextResult) -> TaskContextDTO:
+def task_context_dto_from_result(context: TaskContext) -> TaskContextDTO:
     return TaskContextDTO(
         requested_at=context.requested_at,
         document_id=context.document_id,
@@ -321,22 +322,29 @@ def task_context_dto_from_result(context: TaskContextResult) -> TaskContextDTO:
     )
 
 
-def task_output_dto_from_result(output: TaskOutputItemResult) -> TaskOutputDTO:
+def task_output_dto_from_result(
+    *,
+    output_type: str,
+    result: object,
+    output_id: str | None = None,
+    title: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> TaskOutputDTO:
     output_fields = {
-        "output_id": output.output_id,
-        "title": output.title,
-        "metadata": transport_value(output.metadata),
+        "output_id": output_id,
+        "title": title,
+        "metadata": transport_value(metadata or {}),
     }
-    mapping = _TASK_OUTPUT_MAPPINGS.get(output.output_type)
+    mapping = _TASK_OUTPUT_MAPPINGS.get(output_type)
     if mapping is None:
-        raise TypeError(f"Unsupported task output type: {output.output_type}")
+        raise TypeError(f"Unsupported task result type: {output_type}")
     result_type, dto_type, converter, error_message = mapping
-    if not isinstance(output.result, result_type):
+    if not isinstance(result, result_type):
         raise TypeError(error_message)
     dto_class = cast(Any, dto_type)
     return cast(
         TaskOutputDTO,
-        dto_class(**output_fields, result=converter(output.result)),
+        dto_class(**output_fields, result=converter(result)),
     )
 
 

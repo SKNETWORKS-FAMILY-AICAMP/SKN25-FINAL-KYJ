@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.domain.models.host_actions import (
     CreateDocumentInput,
     CreateDocumentOutput,
     CreateFolderInput,
@@ -15,11 +15,7 @@ from foldmind_ai_core.core.domain.models.workflow.actions import (
     HostActionType,
     LinkDocumentsInput,
 )
-from foldmind_ai_core.core.domain.services.workflow import (
-    apply_successful_host_action_output,
-    host_action_status_for_result,
-    validate_host_action_result_for_action,
-)
+from foldmind_ai_core.core.domain.services.workflow_domain_service import WorkflowDomainService
 from foldmind_ai_core.shared.validation import InvalidInputError
 
 
@@ -55,7 +51,7 @@ class WorkflowActionTests(unittest.TestCase):
             input=CreateFolderInput(name="Projects"),
         )
         with self.assertRaises(InvalidInputError):
-            validate_host_action_result_for_action(
+            WorkflowDomainService().validate_host_action_result(
                 action,
                 HostActionResult(
                     action_id=action.action_id,
@@ -64,7 +60,7 @@ class WorkflowActionTests(unittest.TestCase):
                 ),
             )
         with self.assertRaises(InvalidInputError):
-            validate_host_action_result_for_action(
+            WorkflowDomainService().validate_host_action_result(
                 action,
                 HostActionResult(
                     action_id=action.action_id,
@@ -74,7 +70,7 @@ class WorkflowActionTests(unittest.TestCase):
 
         action.status = HostActionStatus.READY
         with self.assertRaises(InvalidInputError):
-            validate_host_action_result_for_action(
+            WorkflowDomainService().validate_host_action_result(
                 action,
                 HostActionResult(
                     action_id=action.action_id,
@@ -92,7 +88,7 @@ class WorkflowActionTests(unittest.TestCase):
             status=HostActionStatus.READY,
             attempts=1,
         )
-        status = host_action_status_for_result(
+        status = WorkflowDomainService().host_action_status_for_result(
             action,
             HostActionResult(
                 action_id=action.action_id,
@@ -130,7 +126,7 @@ class WorkflowActionTests(unittest.TestCase):
             ),
         )
 
-        error = apply_successful_host_action_output(
+        error = WorkflowDomainService().apply_successful_host_action_output(
             create_folder,
             [earlier_create_document, create_folder, create_document],
             HostActionResult(
@@ -164,7 +160,7 @@ class WorkflowActionTests(unittest.TestCase):
             ),
         )
 
-        error = apply_successful_host_action_output(
+        error = WorkflowDomainService().apply_successful_host_action_output(
             create_document,
             [create_document, link_documents],
             HostActionResult(

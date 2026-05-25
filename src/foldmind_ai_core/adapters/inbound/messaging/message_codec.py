@@ -1,36 +1,42 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
-import hashlib
 from collections.abc import Mapping
 from typing import cast
 
-from foldmind_ai_core.core.domain.models.indexing.outbox import (
+from foldmind_ai_core.core.application.models.projection_commands import (
+    DeleteDocumentProjectionCommand,
+    DeleteFolderProjectionCommand,
+    InvalidateFolderSignalsCommand,
+    ProjectDocumentCommand,
+    ProjectDocumentFolderRelationsCommand,
+    ProjectFolderCommand,
+    ProjectFolderSignalsCommand,
+)
+from foldmind_ai_core.core.application.models.vector_projection import DocumentChunkVectorProjection
+from foldmind_ai_core.core.domain.models.document_folder_relations import (
+    SourceDocumentFolderRelationSnapshot,
+)
+from foldmind_ai_core.core.domain.models.outbox import (
     OUTBOX_PAYLOAD_SCHEMA_VERSION,
     OutboxEvent,
     OutboxEventType,
     OutboxSourceKind,
 )
-from foldmind_ai_core.adapters.inbound.messaging.projection_events import (
-    DocumentDeletedProjectionEvent,
-    DocumentFolderRelationsIndexedProjectionEvent,
-    DocumentIndexedProjectionEvent,
-    FolderDeletedProjectionEvent,
-    FolderIndexedProjectionEvent,
-    FolderSignalsIndexedProjectionEvent,
-    FolderSignalsInvalidatedProjectionEvent,
+from foldmind_ai_core.core.domain.models.document_index_state import DocumentIndexState
+from foldmind_ai_core.core.domain.models.document_signals import (
+    DocumentSignal,
+    DocumentSignalEvidence,
+    DocumentSignalType,
 )
-from foldmind_ai_core.core.application.models.projection_inputs import (
-    ProjectionDocument,
-    ProjectionDocumentFolderRelationSnapshot,
-    ProjectionDocumentProfile,
-    ProjectionDocumentSignal,
-    ProjectionFolder,
-    ProjectionFolderSignal,
-    ProjectionSignalEvidence,
+from foldmind_ai_core.core.domain.models.document_sources import DocumentSourceState
+from foldmind_ai_core.core.domain.models.folder_signals import (
+    FolderSignal,
+    FolderSignalType,
 )
-from foldmind_ai_core.core.application.projections.vector import DocumentChunkVectorProjection
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
 from foldmind_ai_core.shared.types import JsonObject, Metadata
 
 
@@ -54,32 +60,33 @@ def outbox_event_from_flattened_payload(
     return event
 
 
-def document_indexed_event_from_outbox(
+def project_document_command_from_outbox(
     event: OutboxEvent,
-) -> DocumentIndexedProjectionEvent:
+) -> ProjectDocumentCommand:
     _require_event_type(event, OutboxEventType.DOCUMENT_INDEXED)
     _require_source_kind(event, OutboxSourceKind.DOCUMENT)
     payload = event.payload
-    projection_event = DocumentIndexedProjectionEvent(
+    document_index_payload = _nested_json_object(payload, "profile")
+    command = ProjectDocumentCommand(
         document=_source_document_from_payload(
             _nested_json_object(payload, "source_document")
         ),
         chunks=_document_chunks_from_payload(payload.get("chunks")),
-        profile=_document_profile_from_payload(_nested_json_object(payload, "profile")),
+        document_index=_document_index_from_payload(document_index_payload),
         signals=_document_signals_from_payload(payload.get("signals")),
     )
-    _validate_document_indexed_event(projection_event)
-    _validate_tenant(event, projection_event.document.tenant)
+    _validate_document_indexed_command(command, document_index_payload)
+    _validate_tenant(event, command.document.tenant)
     _validate_source_id(
         event,
-        projection_event.document.document_id,
+        command.document.document_id,
     )
-    return projection_event
+    return command
 
 
-def document_folder_relations_indexed_event_from_outbox(
+def project_document_folder_relations_command_from_outbox(
     event: OutboxEvent,
-) -> DocumentFolderRelationsIndexedProjectionEvent:
+) -> ProjectDocumentFolderRelationsCommand:
     _require_event_type(event, OutboxEventType.DOCUMENT_FOLDER_RELATIONS_INDEXED)
     _require_source_kind(event, OutboxSourceKind.DOCUMENT)
     snapshot = _folder_relation_snapshot_from_payload(
@@ -87,47 +94,48 @@ def document_folder_relations_indexed_event_from_outbox(
     )
     _validate_tenant(event, snapshot.tenant)
     _validate_source_id(event, snapshot.document_id)
-    return DocumentFolderRelationsIndexedProjectionEvent(
+    return ProjectDocumentFolderRelationsCommand(
         folder_relation_snapshot=snapshot,
     )
 
 
-def document_deleted_event_from_outbox(
+def delete_document_projection_command_from_outbox(
     event: OutboxEvent,
-) -> DocumentDeletedProjectionEvent:
+) -> DeleteDocumentProjectionCommand:
     _require_event_type(event, OutboxEventType.DOCUMENT_DELETED)
     _require_source_kind(event, OutboxSourceKind.DOCUMENT)
     document_id = _required_text(event.payload, "document_id")
     tenant = _required_text(event.payload, "tenant")
     _validate_tenant(event, tenant)
     _validate_source_id(event, document_id)
-    return DocumentDeletedProjectionEvent(
+    return DeleteDocumentProjectionCommand(
+        tenant=tenant,
         document_id=document_id,
         affected_folder_ids=_string_tuple(event.payload, "affected_folder_ids"),
     )
 
 
-def folder_indexed_event_from_outbox(
+def project_folder_command_from_outbox(
     event: OutboxEvent,
-) -> FolderIndexedProjectionEvent:
+) -> ProjectFolderCommand:
     _require_event_type(event, OutboxEventType.FOLDER_INDEXED)
     _require_source_kind(event, OutboxSourceKind.FOLDER)
-    projection_event = FolderIndexedProjectionEvent(
+    command = ProjectFolderCommand(
         folder=_source_folder_from_payload(
             _nested_json_object(event.payload, "source_folder")
         ),
     )
-    _validate_tenant(event, projection_event.folder.tenant)
-    _validate_source_id(event, projection_event.folder.folder_id)
-    return projection_event
+    _validate_tenant(event, command.folder.tenant)
+    _validate_source_id(event, command.folder.folder_id)
+    return command
 
 
-def folder_signals_indexed_event_from_outbox(
+def project_folder_signals_command_from_outbox(
     event: OutboxEvent,
-) -> FolderSignalsIndexedProjectionEvent:
+) -> ProjectFolderSignalsCommand:
     _require_event_type(event, OutboxEventType.FOLDER_SIGNALS_INDEXED)
     _require_source_kind(event, OutboxSourceKind.FOLDER)
-    projection_event = FolderSignalsIndexedProjectionEvent(
+    command = ProjectFolderSignalsCommand(
         folder=_source_folder_from_payload(
             _nested_json_object(event.payload, "source_folder")
         ),
@@ -141,44 +149,41 @@ def folder_signals_indexed_event_from_outbox(
         ),
         signals=_folder_signals_from_payload(event.payload.get("signals")),
     )
-    _validate_tenant(event, projection_event.folder.tenant)
-    _validate_source_id(event, projection_event.folder.folder_id)
-    return projection_event
+    _validate_tenant(event, command.folder.tenant)
+    _validate_source_id(event, command.folder.folder_id)
+    return command
 
 
-def folder_signals_invalidated_event_from_outbox(
+def invalidate_folder_signals_command_from_outbox(
     event: OutboxEvent,
-) -> FolderSignalsInvalidatedProjectionEvent:
+) -> InvalidateFolderSignalsCommand:
     _require_event_type(event, OutboxEventType.FOLDER_SIGNALS_INVALIDATED)
     _require_source_kind(event, OutboxSourceKind.FOLDER)
     tenant = _required_text(event.payload, "tenant")
     folder_id = _required_text(event.payload, "folder_id")
     _validate_tenant(event, tenant)
     _validate_source_id(event, folder_id)
-    return FolderSignalsInvalidatedProjectionEvent(
+    return InvalidateFolderSignalsCommand(
         tenant=tenant,
         folder_id=folder_id,
         folder_signal_input_digest=_required_text(
             event.payload,
             "folder_signal_input_digest",
         ),
-        signal_generation_version=_required_text(
-            event.payload,
-            "signal_generation_version",
-        ),
     )
 
 
-def folder_deleted_event_from_outbox(
+def delete_folder_projection_command_from_outbox(
     event: OutboxEvent,
-) -> FolderDeletedProjectionEvent:
+) -> DeleteFolderProjectionCommand:
     _require_event_type(event, OutboxEventType.FOLDER_DELETED)
     _require_source_kind(event, OutboxSourceKind.FOLDER)
     folder_id = _required_text(event.payload, "folder_id")
     tenant = _required_text(event.payload, "tenant")
     _validate_tenant(event, tenant)
     _validate_source_id(event, folder_id)
-    return FolderDeletedProjectionEvent(
+    return DeleteFolderProjectionCommand(
+        tenant=tenant,
         folder_id=folder_id,
     )
 
@@ -217,25 +222,28 @@ def _validate_partition_key(partition_key: str, event: OutboxEvent) -> None:
         )
 
 
-def _validate_document_indexed_event(event: DocumentIndexedProjectionEvent) -> None:
+def _validate_document_indexed_command(
+    command: ProjectDocumentCommand,
+    document_index_payload: JsonObject,
+) -> None:
     expected_context = (
-        event.document.tenant,
-        event.document.document_id,
-        event.document.source_version,
-        event.document.content_digest,
-        event.profile.document_index_input_digest,
-        event.profile.document_signal_input_digest,
+        command.document.tenant,
+        command.document.document_id,
+        command.document.source_version,
+        command.document.content_digest,
+        command.document_index.document_index_input_digest,
+        command.document_index.document_signal_input_digest,
     )
-    profile_context = (
-        event.profile.tenant,
-        event.profile.document_id,
-        event.profile.source_version,
-        event.profile.content_digest,
-        event.profile.document_index_input_digest,
-        event.profile.document_signal_input_digest,
+    document_index_context = (
+        _required_text(document_index_payload, "tenant"),
+        command.document_index.document_id,
+        _required_text(document_index_payload, "source_version"),
+        _required_text(document_index_payload, "content_digest"),
+        command.document_index.document_index_input_digest,
+        command.document_index.document_signal_input_digest,
     )
     if (
-        profile_context != expected_context
+        document_index_context != expected_context
         or any(
             (
                 chunk.tenant,
@@ -243,27 +251,29 @@ def _validate_document_indexed_event(event: DocumentIndexedProjectionEvent) -> N
                 chunk.source_version,
                 chunk.content_digest,
                 chunk.source_input_digest,
-                event.profile.document_signal_input_digest,
+                command.document_index.document_signal_input_digest,
             )
             != expected_context
-            for chunk in event.chunks
+            for chunk in command.chunks
         )
         or any(
             (
                 signal.tenant,
                 signal.document_id,
                 signal.source_version,
-                signal.content_digest,
-                event.profile.document_index_input_digest,
+                command.document.content_digest,
+                command.document_index.document_index_input_digest,
                 signal.document_signal_input_digest,
             )
             != expected_context
-            for signal in event.signals
+            for signal in command.signals
         )
     ):
         raise ValueError(
             "Outbox document indexed payload contains mismatched document projection context."
         )
+
+
 def _json_object(value: object) -> JsonObject:
     if isinstance(value, Mapping):
         return cast(JsonObject, dict(value))
@@ -299,8 +309,8 @@ def _payload_schema_version(record: Mapping[str, object]) -> int:
     return version
 
 
-def _source_document_from_payload(payload: JsonObject) -> ProjectionDocument:
-    return ProjectionDocument(
+def _source_document_from_payload(payload: JsonObject) -> DocumentSourceState:
+    return DocumentSourceState(
         tenant=_required_text(payload, "tenant"),
         document_type=_optional_non_blank_text(
             payload.get("document_type"),
@@ -319,8 +329,8 @@ def _source_document_from_payload(payload: JsonObject) -> ProjectionDocument:
 
 def _folder_relation_snapshot_from_payload(
     payload: JsonObject,
-) -> ProjectionDocumentFolderRelationSnapshot:
-    return ProjectionDocumentFolderRelationSnapshot(
+) -> SourceDocumentFolderRelationSnapshot:
+    return SourceDocumentFolderRelationSnapshot(
         tenant=_required_text(payload, "tenant"),
         document_id=_required_text(payload, "document_id"),
         source_version=_required_text(payload, "source_version"),
@@ -328,8 +338,8 @@ def _folder_relation_snapshot_from_payload(
     )
 
 
-def _source_folder_from_payload(payload: JsonObject) -> ProjectionFolder:
-    return ProjectionFolder(
+def _source_folder_from_payload(payload: JsonObject) -> SourceFolder:
+    return SourceFolder(
         tenant=_required_text(payload, "tenant"),
         folder_id=_required_text(payload, "folder_id"),
         source_version=_required_text(payload, "source_version"),
@@ -363,7 +373,6 @@ def _document_chunk_from_payload(payload: JsonObject) -> DocumentChunkVectorProj
         updated_at=_required_text(payload, "updated_at"),
         chunk_id=_required_text(payload, "chunk_id"),
         chunk_index=_required_int(payload, "chunk_index"),
-        chunking_version=_required_text(payload, "chunking_version"),
         text=search_text,
         text_hash=hashlib.sha256(search_text.encode("utf-8")).hexdigest(),
         start_offset=_required_int(payload, "source_start_offset"),
@@ -384,16 +393,17 @@ def _document_chunks_from_payload(
     )
 
 
-def _document_profile_from_payload(payload: JsonObject) -> ProjectionDocumentProfile:
-    return ProjectionDocumentProfile(
-        tenant=_required_text(payload, "tenant"),
-        document_type=_optional_non_blank_text(
-            payload.get("document_type"),
-            "document_type",
-        ),
+def _document_index_from_payload(payload: JsonObject) -> DocumentIndexState:
+    _required_text(payload, "tenant")
+    _optional_non_blank_text(payload.get("document_type"), "document_type")
+    _required_text(payload, "source_version")
+    _required_text(payload, "content_digest")
+    _required_text(payload, "created_at")
+    _required_text(payload, "updated_at")
+    _required_content_text(payload, "title")
+    _metadata(payload, "metadata")
+    return DocumentIndexState(
         document_id=_required_text(payload, "document_id"),
-        source_version=_required_text(payload, "source_version"),
-        content_digest=_required_text(payload, "content_digest"),
         document_index_input_digest=_required_text(
             payload,
             "document_index_input_digest",
@@ -403,15 +413,12 @@ def _document_profile_from_payload(payload: JsonObject) -> ProjectionDocumentPro
             "document_signal_input_digest",
         ),
         signal_generation_version=_required_text(payload, "signal_generation_version"),
-        created_at=_required_text(payload, "created_at"),
-        updated_at=_required_text(payload, "updated_at"),
-        title=_required_content_text(payload, "title"),
-        metadata=_metadata(payload, "metadata"),
     )
 
 
-def _document_signal_from_payload(payload: JsonObject) -> ProjectionDocumentSignal:
-    return ProjectionDocumentSignal(
+def _document_signal_from_payload(payload: JsonObject) -> DocumentSignal:
+    _required_text(payload, "content_digest")
+    return DocumentSignal(
         signal_id=_required_text(payload, "signal_id"),
         tenant=_required_text(payload, "tenant"),
         document_type=_optional_non_blank_text(
@@ -420,7 +427,6 @@ def _document_signal_from_payload(payload: JsonObject) -> ProjectionDocumentSign
         ),
         document_id=_required_text(payload, "document_id"),
         source_version=_required_text(payload, "source_version"),
-        content_digest=_required_text(payload, "content_digest"),
         document_signal_input_digest=_required_text(
             payload,
             "document_signal_input_digest",
@@ -429,7 +435,7 @@ def _document_signal_from_payload(payload: JsonObject) -> ProjectionDocumentSign
             payload,
             "signal_generation_version",
         ),
-        signal_type=_required_text(payload, "signal_type"),
+        signal_type=DocumentSignalType(_required_text(payload, "signal_type")),
         signal_key=_required_text(payload, "signal_key"),
         text=_required_content_text(payload, "text"),
         attributes=_metadata(payload, "attributes"),
@@ -447,15 +453,15 @@ def _document_signal_from_payload(payload: JsonObject) -> ProjectionDocumentSign
 
 def _document_signals_from_payload(
     value: object,
-) -> tuple[ProjectionDocumentSignal, ...]:
+) -> tuple[DocumentSignal, ...]:
     return tuple(
         _document_signal_from_payload(signal)
         for signal in _json_object_items(value, "signals")
     )
 
 
-def _folder_signal_from_payload(payload: JsonObject) -> ProjectionFolderSignal:
-    return ProjectionFolderSignal(
+def _folder_signal_from_payload(payload: JsonObject) -> FolderSignal:
+    return FolderSignal(
         signal_id=_required_text(payload, "signal_id"),
         tenant=_required_text(payload, "tenant"),
         folder_id=_required_text(payload, "folder_id"),
@@ -468,7 +474,7 @@ def _folder_signal_from_payload(payload: JsonObject) -> ProjectionFolderSignal:
             payload,
             "signal_generation_version",
         ),
-        signal_type=_required_text(payload, "signal_type"),
+        signal_type=FolderSignalType(_required_text(payload, "signal_type")),
         signal_key=_required_text(payload, "signal_key"),
         text=_required_content_text(payload, "text"),
         related_document_id=_optional_non_blank_text(
@@ -488,15 +494,15 @@ def _folder_signal_from_payload(payload: JsonObject) -> ProjectionFolderSignal:
     )
 
 
-def _folder_signals_from_payload(value: object) -> tuple[ProjectionFolderSignal, ...]:
+def _folder_signals_from_payload(value: object) -> tuple[FolderSignal, ...]:
     return tuple(
         _folder_signal_from_payload(signal)
         for signal in _optional_json_object_items(value, "signals")
     )
 
 
-def _signal_evidence_from_payload(payload: JsonObject) -> ProjectionSignalEvidence:
-    return ProjectionSignalEvidence(
+def _signal_evidence_from_payload(payload: JsonObject) -> DocumentSignalEvidence:
+    return DocumentSignalEvidence(
         chunk_id=_required_text(payload, "chunk_id"),
         quote=_required_content_text(payload, "quote"),
         start_offset=_optional_int(payload.get("start_offset")),

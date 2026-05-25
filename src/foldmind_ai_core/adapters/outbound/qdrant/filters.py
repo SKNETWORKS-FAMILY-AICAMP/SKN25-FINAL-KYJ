@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from foldmind_ai_core.adapters.outbound.qdrant.client import QdrantCollectionClient
-from foldmind_ai_core.core.application.queries.retrieval import SearchScope
+from foldmind_ai_core.core.application.models.search import SearchScope
 from foldmind_ai_core.shared.validation import InvalidInputError
 
 

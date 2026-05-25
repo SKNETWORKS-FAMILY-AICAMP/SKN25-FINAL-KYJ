@@ -6,7 +6,7 @@ from foldmind_ai_core.core.application.workflows.state.execution import (
     WorkflowArtifactName,
 )
 from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskOutputType
+from foldmind_ai_core.core.domain.models.tasks import TaskOutputType
 
 STEP_SPECS: dict[WorkflowActionType, StepSpec] = {
     WorkflowActionType.FIND_DOCUMENTS: StepSpec(

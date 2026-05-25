@@ -1,1 +1,0 @@
-"""OpenAI outbound adapter package."""

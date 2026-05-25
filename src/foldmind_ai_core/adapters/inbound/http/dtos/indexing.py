@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from foldmind_ai_core.adapters.inbound.http.dtos.dto_model import APIDTO
 from foldmind_ai_core.adapters.inbound.http.dtos.documents import (
     RetrievedFolderDTO,
     SourceDocumentDTO,
     SourceFolderDTO,
 )
+from foldmind_ai_core.adapters.inbound.http.dtos.dto_model import APIDTO
 
 
 class IndexDocumentRequest(APIDTO):
@@ -14,12 +14,6 @@ class IndexDocumentRequest(APIDTO):
 
 class IndexDocumentResponse(APIDTO):
     indexed_chunk_count: int
-
-
-class UpdateDocumentFolderRelationsRequest(APIDTO):
-    tenant: str
-    source_version: str
-    folder_ids: tuple[str, ...] = ()
 
 
 class IndexFolderRequest(APIDTO):

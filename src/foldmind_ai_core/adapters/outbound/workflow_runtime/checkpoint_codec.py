@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import fields
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from foldmind_ai_core.adapters.outbound.json_model_codec import JsonModelCodec
@@ -10,46 +11,41 @@ from foldmind_ai_core.adapters.outbound.workflow_runtime.workflow_checkpoint imp
     CHECKPOINT_STATE_VERSION,
     WorkflowCheckpointState,
 )
-from foldmind_ai_core.core.application.workflows.state.execution import (
+from foldmind_ai_core.core.application.ports.outbound.runtime.workflow_runtime import (
     WorkflowArtifactName,
     WorkflowArtifacts,
     WorkflowExecutionPlan,
     WorkflowExecutionTrace,
+    WorkflowState,
     WorkflowStep,
     WorkflowStepInput,
 )
-from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.generation.results import (
+from foldmind_ai_core.core.application.models.search import (
+    RequestContext,
+    SearchScope,
+    SearchSort,
+)
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
+from foldmind_ai_core.core.application.models.generation import (
     AssistantClarification,
     DocumentRecommendation,
     DocumentRecommendationResult,
-    DocumentSearchItem,
     DocumentSearchResult,
     DraftResult,
     FolderRecommendation,
     FolderRecommendationResult,
     GeneratedTextResult,
-    RelatedRecommendationItem,
     RelatedRecommendationResult,
 )
-from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
-from foldmind_ai_core.core.application.queries.retrieval import (
-    RetrievalQuery,
-    QueryAnchor,
-    RequestContext,
-    SearchScope,
-    SearchSort,
-    TimestampRange,
-)
-from foldmind_ai_core.core.domain.models.retrieval.results import (
+from foldmind_ai_core.core.application.models.retrieval import (
     FolderRetrievalResult,
-    RelatedRetrievalItem,
     RelatedRetrievalResult,
     RetrievalResult,
     RetrievedDocument,
-    RetrievedFolder,
 )
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.domain.models.document_chunks import DocumentChunk
+from foldmind_ai_core.core.domain.models.folder_sources import SourceFolder
+from foldmind_ai_core.core.domain.models.host_actions import (
     ActionPlan,
     CreateDocumentInput,
     CreateDocumentOutput,
@@ -65,11 +61,9 @@ from foldmind_ai_core.core.domain.models.workflow.actions import (
     UpdateDocumentInput,
     UpdateDocumentOutput,
 )
-from foldmind_ai_core.core.domain.models.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.tasks import (
     TaskAnalysis,
-    TaskAppendInput,
     TaskContext,
-    TaskCreationInput,
     TaskEvent,
     TaskFinalResult,
     TaskInputEntry,
@@ -96,7 +90,6 @@ _CHECKPOINT_MODELS = (
     DocumentChunk,
     DocumentRecommendation,
     DocumentRecommendationResult,
-    DocumentSearchItem,
     DocumentSearchResult,
     DraftResult,
     FolderRecommendation,
@@ -107,25 +100,19 @@ _CHECKPOINT_MODELS = (
     HostActionPolicy,
     HostActionResult,
     RetrievedDocument,
-    RetrievedFolder,
+    SourceFolder,
     LinkDocumentsInput,
     LinkDocumentsOutput,
     MoveDocumentInput,
     MoveDocumentOutput,
-    QueryAnchor,
-    RelatedRecommendationItem,
     RelatedRecommendationResult,
-    RelatedRetrievalItem,
     RelatedRetrievalResult,
     RequestContext,
     RetrievalResult,
     SearchScope,
     SearchSort,
-    TimestampRange,
     TaskAnalysis,
-    TaskAppendInput,
     TaskContext,
-    TaskCreationInput,
     TaskEvent,
     TaskFinalResult,
     TaskInputEntry,
@@ -159,6 +146,7 @@ _CODEC = JsonModelCodec(
         "JsonValue": JsonValue,
         "JsonObject": JsonObject,
         "Metadata": Metadata,
+        "datetime": datetime,
     },
     post_decode=_post_decode,
     label="checkpoint",

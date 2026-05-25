@@ -13,13 +13,13 @@ from foldmind_ai_core.adapters.outbound.qdrant.mappers import (
     signal_from_payload,
     signal_payload,
 )
-from foldmind_ai_core.core.application.ports.outbound.vector_store import VectorWriteResult
-from foldmind_ai_core.core.application.projections.vector import (
+from foldmind_ai_core.core.application.models.vector_projection import (
     DocumentSignalVectorProjection,
     FolderSignalVectorProjection,
+    VectorWriteResult,
 )
-from foldmind_ai_core.core.application.queries.retrieval import SearchScope
-from foldmind_ai_core.core.domain.models.retrieval.results import SignalRetrievalResult
+from foldmind_ai_core.core.application.models.search import SearchScope
+from foldmind_ai_core.core.application.models.retrieval import SignalRetrievalResult
 from foldmind_ai_core.shared.canonical_json import json_digest
 from foldmind_ai_core.shared.internal_ids import stable_internal_id
 from foldmind_ai_core.shared.types import Vector
@@ -48,6 +48,7 @@ class QdrantSignalVectorStore:
                 "all signals must belong to the replaced document_id."
             )
         self.delete_document_signals(
+            tenant=tenant,
             document_id=document_id,
         )
         return self._upsert_signals(
@@ -59,10 +60,12 @@ class QdrantSignalVectorStore:
     def delete_document_signals(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         self.client.delete_by_filter(
             self.client.filter(
+                tenant=tenant,
                 owner_kind="document",
                 document_id=document_id,
             )
@@ -83,7 +86,10 @@ class QdrantSignalVectorStore:
             for signal in signals
         ):
             raise InvalidInputError("all signals must belong to the replaced folder_id.")
-        self.delete_folder_signals(folder_id=folder_id)
+        self.delete_folder_signals(
+            tenant=tenant,
+            folder_id=folder_id,
+        )
         return self._upsert_signals(
             signals=signals,
             vectors=vectors,
@@ -93,10 +99,12 @@ class QdrantSignalVectorStore:
     def delete_folder_signals(
         self,
         *,
+        tenant: str,
         folder_id: str,
     ) -> None:
         self.client.delete_by_filter(
             self.client.filter(
+                tenant=tenant,
                 owner_kind="folder",
                 folder_id=folder_id,
             )
@@ -105,12 +113,14 @@ class QdrantSignalVectorStore:
     def delete_stale_folder_signals(
         self,
         *,
+        tenant: str,
         folder_id: str,
         current_folder_signal_input_digest: str,
     ) -> None:
         self.client.delete_by_filter(
             self.client._models.Filter(
                 must=[
+                    self.client._match_value_condition("tenant", tenant),
                     self.client._match_value_condition("owner_kind", "folder"),
                     self.client._match_value_condition("folder_id", folder_id),
                 ],
@@ -173,6 +183,7 @@ class QdrantSignalVectorStore:
                 point_id=_signal_point_id(
                     collection_name=self.client.collection_name,
                     owner_kind=owner_kind,
+                    tenant=signal.tenant,
                     owner_id=_signal_owner_id(signal),
                     signal_id=signal.signal_id,
                     vector_input_digest=signal.vector_input_digest,
@@ -203,6 +214,7 @@ def _signal_point_id(
     *,
     collection_name: str,
     owner_kind: str,
+    tenant: str,
     owner_id: str,
     signal_id: str,
     vector_input_digest: str,
@@ -211,6 +223,7 @@ def _signal_point_id(
         collection_name,
         "signal-vector",
         owner_kind,
+        tenant,
         owner_id,
         signal_id,
         vector_input_digest,

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from foldmind_ai_core.core.domain.models.generation.results import (
+from foldmind_ai_core.core.application.models.generation import (
     FolderRecommendationResult,
     RelatedRecommendationResult,
 )
-from foldmind_ai_core.core.domain.models.workflow.actions import HostActionPolicy
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskSnapshot
+from foldmind_ai_core.core.domain.models.host_actions import HostActionPolicy
+from foldmind_ai_core.core.domain.models.tasks import TaskSnapshot
 from foldmind_ai_core.shared.types import JsonObject
 
 

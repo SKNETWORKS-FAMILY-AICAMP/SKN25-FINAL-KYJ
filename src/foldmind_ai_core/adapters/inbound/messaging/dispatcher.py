@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from foldmind_ai_core.core.domain.models.indexing.outbox import OutboxEvent, OutboxEventType
+from foldmind_ai_core.core.domain.models.outbox import OutboxEvent, OutboxEventType
 
 
 class OutboxEventConsumer(Protocol):
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
         ...
 
 
@@ -21,7 +21,7 @@ class OutboxEventDispatcher:
     folder_signals_indexed: OutboxEventConsumer | None = None
     folder_signals_invalidated: OutboxEventConsumer | None = None
 
-    def consume_outbox_event(self, event: OutboxEvent) -> None:
+    async def consume_outbox_event(self, event: OutboxEvent) -> None:
         event_type = OutboxEventType(event.event_type)
         match event_type:
             case OutboxEventType.DOCUMENT_INDEXED:
@@ -39,4 +39,4 @@ class OutboxEventDispatcher:
             case OutboxEventType.FOLDER_DELETED:
                 consumer = self.folder_deleted
         if consumer is not None:
-            consumer.consume_outbox_event(event)
+            await consumer.consume_outbox_event(event)

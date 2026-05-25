@@ -14,7 +14,12 @@ from foldmind_ai_core.core.application.workflows.state.execution import (
 )
 from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskAnalysis, TaskContext, TaskSnapshot, TaskStatus
+from foldmind_ai_core.core.domain.models.tasks import (
+    TaskAnalysis,
+    TaskContext,
+    TaskSnapshot,
+    TaskStatus,
+)
 
 
 class LangGraphWorkflowNodesTests(unittest.TestCase):

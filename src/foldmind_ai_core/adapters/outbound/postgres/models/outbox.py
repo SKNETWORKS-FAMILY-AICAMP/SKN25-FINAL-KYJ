@@ -1,17 +1,36 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import Any
 
-from foldmind_ai_core.shared.types import JsonObject
+from sqlalchemy import BigInteger, SmallInteger, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from foldmind_ai_core.adapters.outbound.postgres.models.base import (
+    CreatedAtColumn,
+    PostgresOrmBase,
+)
 
 
-@dataclass(frozen=True, slots=True)
-class PostgresOutboxEventRecord:
-    event_id: str
-    tenant: str
-    source_kind: str
-    source_id: str
-    event_type: str
-    payload_schema_version: int
-    idempotency_key: str
-    payload: JsonObject
+class OutboxEventRow(CreatedAtColumn, PostgresOrmBase):
+    __tablename__ = "outbox_events"
+
+    event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text, nullable=False)
+    event_sequence: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[str] = mapped_column(Text, nullable=False)
+    partition_key: Mapped[str | None] = mapped_column(Text)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_schema_version: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )

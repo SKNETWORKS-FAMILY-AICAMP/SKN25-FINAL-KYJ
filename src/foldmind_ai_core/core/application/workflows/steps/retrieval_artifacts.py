@@ -3,44 +3,34 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING
 
-from foldmind_ai_core.core.application.factories.retrieval_results import (
-    folder_search_results_to_domain,
-    signal_search_results_to_domain,
-)
-from foldmind_ai_core.core.application.queries.retrieval import (
+from foldmind_ai_core.core.application.prompts import PROMPT_SUMMARIZATION
+from foldmind_ai_core.core.application.models.retrieval import (
     FolderSearchQuery,
     RetrievalQuery,
 )
-from foldmind_ai_core.core.application.services.prompts import PROMPT_SUMMARIZATION
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.generation.results import (
-    DocumentSearchItem,
+from foldmind_ai_core.core.application.models.generation import (
+    DocumentRecommendation,
     DocumentSearchResult,
     GeneratedTextResult,
 )
-from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
-from foldmind_ai_core.core.domain.models.retrieval.results import (
+from foldmind_ai_core.core.application.models.retrieval import (
     FolderRetrievalResult,
-    RelatedRetrievalItem,
     RelatedRetrievalResult,
     RetrievalResult,
     RetrievedDocument,
     RetrievedSignal,
-    RetrievedSignalEvidence,
     SignalRetrievalResult,
 )
+from foldmind_ai_core.core.domain.models.document_chunks import DocumentChunk
+from foldmind_ai_core.core.domain.models.document_signals import DocumentSignalEvidence
 from foldmind_ai_core.shared.types import JsonObject
+from foldmind_ai_core.shared.validation import InvalidInputError
 
 if TYPE_CHECKING:
     from foldmind_ai_core.core.application.workflows.steps.executor import WorkflowStepExecutor
 
-SIGNAL_EVIDENCE_CHUNKING_VERSION = "signal-evidence-v1"
-SIGNAL_EVIDENCE_EMBEDDING_MODEL = "not-embedded"
-SIGNAL_EVIDENCE_EMBEDDING_VERSION = "not-embedded"
-SIGNAL_EVIDENCE_INDEX_SCHEMA_VERSION = "signal-evidence-v1"
-
-
-def document_summaries(
+async def document_summaries(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     *,
@@ -58,7 +48,7 @@ def document_summaries(
         if not document_results:
             continue
         summaries.append(
-            ctx.context_generator.generate(
+            await ctx.context_generator.generate(
                 prompt_name=PROMPT_SUMMARIZATION,
                 instruction=instruction,
                 citations=document_results,
@@ -67,18 +57,18 @@ def document_summaries(
     return summaries
 
 
-def document_search_result(
+async def document_search_result(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
 ) -> DocumentSearchResult:
-    items_by_document: dict[tuple[str, str], DocumentSearchItem] = {}
-    for result in document_retrieval_or_search(ctx, state, query):
+    items_by_document: dict[tuple[str, str], DocumentRecommendation] = {}
+    for result in await document_retrieval_or_search(ctx, state, query):
         document = retrieved_document_from_result(result)
         key = (document.tenant, document.document_id)
         item = items_by_document.get(key)
         if item is None:
-            items_by_document[key] = DocumentSearchItem(
+            items_by_document[key] = DocumentRecommendation(
                 document=document,
                 score=result.score,
                 reason="Document matches the search request.",
@@ -95,18 +85,15 @@ def document_search_result(
     return DocumentSearchResult(items=items)
 
 
-def signal_search_result(
+async def signal_search_result(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
 ) -> GeneratedTextResult:
-    signals = signal_retrieval_or_search(ctx, state, query)
+    signals = await signal_retrieval_or_search(ctx, state, query)
     if not signals:
         return GeneratedTextResult(text="관련 signal을 찾지 못했습니다.", citations=[])
-    lines = [
-        f"- [{result.signal.signal_type}] {result.signal.text}"
-        for result in signals
-    ]
+    lines = [f"- [{result.signal.signal_type}] {result.signal.text}" for result in signals]
     return GeneratedTextResult(
         text="\n".join(lines),
         citations=signal_evidence_or_expand(ctx, state, signals),
@@ -118,15 +105,13 @@ def signal_synthesis_instruction(
     instruction: str,
     signals: list[SignalRetrievalResult],
 ) -> str:
-    signal_lines = [
-        f"- [{result.signal.signal_type}] {result.signal.text}"
-        for result in signals
-    ]
+    signal_lines = [f"- [{result.signal.signal_type}] {result.signal.text}" for result in signals]
     return "\n".join(
         (
             instruction,
             "",
-            "다음 knowledge signals를 중심으로 답변하되, 근거 citation에 없는 내용은 단정하지 않는다.",
+            "다음 signals를 중심으로 답변하되, "
+            "근거 citation에 없는 내용은 단정하지 않는다.",
             *signal_lines,
         )
     )
@@ -188,7 +173,7 @@ def merge_signal_results(
     return sorted(merged.values(), key=lambda result: result.score, reverse=True)
 
 
-def on_demand_signals_from_documents(
+async def on_demand_signals_from_documents(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
@@ -197,7 +182,7 @@ def on_demand_signals_from_documents(
     top_k: int,
 ) -> list[SignalRetrievalResult]:
     results: list[SignalRetrievalResult] = []
-    for retrieval in document_retrieval_or_search(ctx, state, query)[:top_k]:
+    for retrieval in (await document_retrieval_or_search(ctx, state, query))[:top_k]:
         chunk = retrieval.chunk
         signal_id = _on_demand_signal_id(
             tenant=chunk.tenant,
@@ -217,7 +202,7 @@ def on_demand_signals_from_documents(
                     document_id=chunk.document_id,
                     source_version=chunk.source_version,
                     evidence=(
-                        RetrievedSignalEvidence(
+                        DocumentSignalEvidence(
                             chunk_id=chunk.chunk_id,
                             quote=chunk.text,
                             start_offset=chunk.start_offset,
@@ -235,7 +220,7 @@ def on_demand_signals_from_documents(
 
 def signal_evidence_chunk(
     result: SignalRetrievalResult,
-    evidence: RetrievedSignalEvidence,
+    evidence: DocumentSignalEvidence,
 ) -> DocumentChunk:
     signal = result.signal
     return _document_chunk_for_signal(
@@ -270,7 +255,7 @@ def signal_text_chunk(result: SignalRetrievalResult) -> DocumentChunk:
     )
 
 
-def signal_retrieval_or_search(
+async def signal_retrieval_or_search(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
@@ -278,10 +263,10 @@ def signal_retrieval_or_search(
     existing = ctx.artifacts.signal_retrieval(state)
     if existing:
         return existing
-    return signal_search_results_to_domain(ctx.find_signals.execute(query))
+    return list(await ctx.signal_search.search(query))
 
 
-def document_retrieval_or_search(
+async def document_retrieval_or_search(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
@@ -289,10 +274,10 @@ def document_retrieval_or_search(
     retrieval = ctx.artifacts.optional_document_retrieval(state)
     if retrieval is not None:
         return retrieval
-    return list(ctx.find_documents.execute(query).results)
+    return list(await ctx.document_search.search(query))
 
 
-def folder_retrieval_or_search(
+async def folder_retrieval_or_search(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
@@ -300,8 +285,8 @@ def folder_retrieval_or_search(
     existing = ctx.artifacts.folder_retrieval(state)
     if existing is not None:
         return existing
-    return folder_search_results_to_domain(
-        ctx.find_folders.execute(folder_search_query_from_retrieval_query(query))
+    return list(
+        await ctx.folder_search.search(folder_search_query_from_retrieval_query(query))
     )
 
 
@@ -337,8 +322,7 @@ def related_retrieval(
     documents: list[RetrievalResult],
     folders: list[FolderRetrievalResult],
 ) -> RelatedRetrievalResult:
-    items = [RelatedRetrievalItem(target=document) for document in documents]
-    items.extend(RelatedRetrievalItem(target=folder) for folder in folders)
+    items: list[RetrievalResult | FolderRetrievalResult] = [*documents, *folders]
     items.sort(key=lambda item: item.score, reverse=True)
     return RelatedRetrievalResult(items=items)
 
@@ -393,23 +377,26 @@ def _document_chunk_for_signal(
     return DocumentChunk(
         tenant=signal.tenant,
         document_type=signal.document_type,
-        document_id=signal.document_id
-        or signal.related_document_id
-        or signal.folder_id
-        or "",
+        document_id=_signal_evidence_owner_id(signal),
         source_version=signal.source_version,
         document_index_input_digest="signal-evidence-index-input-v1",
         created_at="",
         updated_at="",
         chunk_id=chunk_id,
         chunk_index=0,
-        chunking_version=SIGNAL_EVIDENCE_CHUNKING_VERSION,
         text=text,
-        text_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         start_offset=start_offset,
         end_offset=end_offset,
-        embedding_model=SIGNAL_EVIDENCE_EMBEDDING_MODEL,
-        embedding_version=SIGNAL_EVIDENCE_EMBEDDING_VERSION,
-        index_schema_version=SIGNAL_EVIDENCE_INDEX_SCHEMA_VERSION,
         metadata=metadata,
     )
+
+
+def _signal_evidence_owner_id(signal: RetrievedSignal) -> str:
+    for value in (signal.document_id, signal.related_document_id):
+        if value is not None and value.strip():
+            return value.strip()
+    if signal.owner_kind == "folder" and signal.folder_id is not None:
+        folder_id = signal.folder_id.strip()
+        if folder_id:
+            return f"folder:{folder_id}"
+    raise InvalidInputError("retrieved signal must reference a document or folder.")

@@ -13,13 +13,15 @@ from foldmind_ai_core.adapters.outbound.qdrant.mappers import (
     payload_from_point,
     score_from_point,
 )
-from foldmind_ai_core.core.application.ports.outbound.vector_store import VectorWriteResult
-from foldmind_ai_core.core.application.projections.vector import DocumentChunkVectorProjection
-from foldmind_ai_core.core.application.queries.retrieval import SearchScope
-from foldmind_ai_core.core.application.queries.scope_matching import (
+from foldmind_ai_core.core.application.models.vector_projection import (
+    DocumentChunkVectorProjection,
+    VectorWriteResult,
+)
+from foldmind_ai_core.core.application.models.search import SearchScope
+from foldmind_ai_core.core.application.models.retrieval import RetrievalResult
+from foldmind_ai_core.core.application.search_scope import (
     sort_by_timestamp_scope,
 )
-from foldmind_ai_core.core.domain.models.retrieval.results import RetrievalResult
 from foldmind_ai_core.shared.canonical_json import json_digest
 from foldmind_ai_core.shared.types import Vector
 from foldmind_ai_core.shared.validation import InvalidInputError
@@ -54,6 +56,7 @@ class QdrantDocumentChunkVectorStore:
             for chunk, vector, payload in zip(chunks, vectors, payloads, strict=True)
         ]
         self.delete_document_chunks(
+            tenant=tenant,
             document_id=document_id,
         )
         self.client.upsert_points(points)
@@ -69,10 +72,12 @@ class QdrantDocumentChunkVectorStore:
     def delete_document_chunks(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         self.client.delete_by_filter(
             self.client.filter(
+                tenant=tenant,
                 document_id=document_id,
             )
         )

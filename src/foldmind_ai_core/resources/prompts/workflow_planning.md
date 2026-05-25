@@ -80,7 +80,8 @@ For date-relative search, include params.temporal on retrieval actions:
 - Map edited/modified/updated, Korean "수정한", "업데이트한" to field "updated_at".
 - Use {"field":"updated_at","sort":"desc"} when the user asks about edited/updated items.
 - Add "period" with one of "today", "yesterday", "this_week", "last_week",
-  "this_month", or "last_month" when the request names a relative date window.
+  "this_month", or "last_month" when the request names a relative date reference.
+- Add "timestamp" as an ISO-8601 timestamp when the request names an explicit date.
 The request_context.requested_at timestamp is the reference time for relative periods.
 For comprehensive analysis requests about recurring issues, decisions, commitments,
 claims, concepts, or entities, use find_signals with the matching signal_type,

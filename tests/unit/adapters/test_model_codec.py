@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from foldmind_ai_core.adapters.outbound.domain_model_codec import (
-    domain_model_json,
-    restore_domain_model_json,
+from foldmind_ai_core.adapters.outbound.workflow_model_codec import (
+    restore_workflow_model_json,
+    workflow_model_json,
 )
 from foldmind_ai_core.adapters.outbound.workflow_runtime.checkpoint_codec import (
     workflow_state_from_checkpoint,
@@ -18,24 +18,29 @@ from foldmind_ai_core.core.application.workflows.state.execution import (
 )
 from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
-from foldmind_ai_core.core.domain.models.workflow.actions import (
+from foldmind_ai_core.core.application.models.generation import (
+    DocumentRecommendation,
+    DocumentSearchResult,
+)
+from foldmind_ai_core.core.application.models.retrieval import RetrievedDocument
+from foldmind_ai_core.core.domain.models.host_actions import (
     HostAction,
     HostActionType,
     UpdateDocumentInput,
 )
-from foldmind_ai_core.core.domain.models.generation.results import (
-    DocumentSearchItem,
-    DocumentSearchResult,
+from foldmind_ai_core.core.domain.models.tasks import (
+    TaskAnalysis,
+    TaskContext,
+    TaskSnapshot,
+    TaskStatus,
 )
-from foldmind_ai_core.core.domain.models.retrieval.results import RetrievedDocument
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskAnalysis, TaskContext, TaskSnapshot, TaskStatus
 
 
-class DomainModelCodecTests(unittest.TestCase):
-    def test_domain_model_codec_restores_document_search_result(self) -> None:
+class WorkflowModelCodecTests(unittest.TestCase):
+    def test_workflow_model_codec_restores_document_search_result(self) -> None:
         result = DocumentSearchResult(
             items=[
-                DocumentSearchItem(
+                DocumentRecommendation(
                     document=RetrievedDocument(
                         tenant="tenant-1",
                         document_type="document",
@@ -48,12 +53,15 @@ class DomainModelCodecTests(unittest.TestCase):
             ]
         )
 
-        restored = restore_domain_model_json(domain_model_json(result), DocumentSearchResult)
+        restored = restore_workflow_model_json(
+            workflow_model_json(result),
+            DocumentSearchResult,
+        )
 
         self.assertEqual(restored, result)
 
-    def test_domain_model_codec_restores_update_document_metadata(self) -> None:
-        encoded = domain_model_json(
+    def test_workflow_model_codec_restores_update_document_metadata(self) -> None:
+        encoded = workflow_model_json(
             UpdateDocumentInput(
                 document_type="document",
                 document_id="doc-1",
@@ -61,7 +69,7 @@ class DomainModelCodecTests(unittest.TestCase):
             )
         )
 
-        restored = restore_domain_model_json(encoded, UpdateDocumentInput)
+        restored = restore_workflow_model_json(encoded, UpdateDocumentInput)
 
         self.assertEqual(restored.metadata, {"source_tags": ["startup", "research"]})
 

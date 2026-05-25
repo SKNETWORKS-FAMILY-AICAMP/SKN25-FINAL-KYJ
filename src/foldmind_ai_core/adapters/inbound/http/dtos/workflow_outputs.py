@@ -10,6 +10,11 @@ from foldmind_ai_core.adapters.inbound.http.dtos.retrieval import (
 )
 
 
+class GeneratedTextDTO(APIDTO):
+    text: str
+    citations: list[RetrievalResultDTO] = Field(default_factory=list)
+
+
 class AssistantClarificationDTO(APIDTO):
     question: str
     reason: str

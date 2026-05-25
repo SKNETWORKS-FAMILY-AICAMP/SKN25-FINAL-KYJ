@@ -67,7 +67,7 @@ class FakeOpenAISDK:
         )
 
 
-class OpenAIProviderTests(unittest.TestCase):
+class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
     def test_openai_settings_reject_malformed_retry_and_timeout_values(self) -> None:
         with self.assertRaises(InvalidInputError):
             OpenAISettings(api_key=" ")
@@ -89,11 +89,11 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertEqual(settings.api_key, "test-key")
         self.assertEqual(settings.base_url, "https://api.openai.test")
 
-    def test_llm_maps_messages_to_responses_api_and_returns_output_text(self) -> None:
+    async def test_llm_maps_messages_to_responses_api_and_returns_output_text(self) -> None:
         sdk_client = FakeOpenAISDK(text_response=FakeTextResponse("generated text"))
         llm = OpenAILLMProvider(model="gpt-5", client=_openai_client(sdk_client))
 
-        result = llm.generate(
+        result = await llm.generate(
             [
                 LLMMessage(role="system", content="system prompt"),
                 LLMMessage(role="user", content="user request"),
@@ -110,22 +110,22 @@ class OpenAIProviderTests(unittest.TestCase):
             ],
         )
 
-    def test_llm_rejects_empty_output_text(self) -> None:
+    async def test_llm_rejects_empty_output_text(self) -> None:
         llm = OpenAILLMProvider(
             model="gpt-5",
             client=_openai_client(FakeOpenAISDK(text_response=FakeTextResponse(""))),
         )
 
         with self.assertRaisesRegex(AIProviderError, "non-empty output_text"):
-            llm.generate([LLMMessage(role="user", content="hello")])
+            await llm.generate([LLMMessage(role="user", content="hello")])
 
-    def test_llm_rejects_malformed_text_response(self) -> None:
+    async def test_llm_rejects_malformed_text_response(self) -> None:
         sdk_client = FakeOpenAISDK(text_response=FakeTextResponse("unused"))
         sdk_client.responses.response = object()
         llm = OpenAILLMProvider(model="gpt-5", client=_openai_client(sdk_client))
 
         with self.assertRaisesRegex(AIProviderError, "output_text"):
-            llm.generate([LLMMessage(role="user", content="hello")])
+            await llm.generate([LLMMessage(role="user", content="hello")])
 
     def test_embedding_provider_preserves_input_order_and_dimensions(self) -> None:
         sdk_client = FakeOpenAISDK(

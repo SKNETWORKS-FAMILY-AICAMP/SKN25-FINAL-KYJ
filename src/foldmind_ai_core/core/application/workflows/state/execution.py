@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
 from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery
-from foldmind_ai_core.core.domain.models.workflow.tasks import TaskOutputResult, TaskOutputType
+from foldmind_ai_core.core.domain.models.tasks import TaskOutputType, TaskOutputValue
 from foldmind_ai_core.shared.types import JsonObject
 
 
@@ -63,7 +63,7 @@ class StepSpec:
 @dataclass(slots=True)
 class StepOutcome:
     artifacts: dict[WorkflowArtifactName, object] = field(default_factory=dict)
-    output: TaskOutputResult | None = None
+    output: TaskOutputValue | None = None
 
 
 @dataclass(slots=True)

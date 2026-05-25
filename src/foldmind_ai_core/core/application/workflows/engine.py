@@ -2,32 +2,40 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
 
-from foldmind_ai_core.core.application.capabilities.generation import (
-    WorkflowPlanningCapability,
-)
+from foldmind_ai_core.core.application.models.search import RequestContext
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
 from foldmind_ai_core.core.application.workflows.host_actions.result_service import (
     HostActionResultService,
 )
 from foldmind_ai_core.core.application.workflows.plan_compiler import WorkflowPlanCompiler
 from foldmind_ai_core.core.application.workflows.state.execution import WorkflowArtifacts
-from foldmind_ai_core.core.application.workflows.state.plan import WorkflowActionType
+from foldmind_ai_core.core.application.workflows.state.plan import (
+    WorkflowActionType,
+    WorkflowPlan,
+)
 from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
 from foldmind_ai_core.core.application.workflows.steps.executor import WorkflowStepExecutor
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery, RequestContext
-from foldmind_ai_core.core.domain.models.workflow.actions import HostActionResult
-from foldmind_ai_core.core.domain.models.workflow.tasks import (
+from foldmind_ai_core.core.domain.models.host_actions import HostActionResult
+from foldmind_ai_core.core.domain.models.tasks import (
     TaskAnalysis,
     TaskJob,
     TaskJobStatus,
     TaskStatus,
 )
+from foldmind_ai_core.shared.types import JsonObject
 from foldmind_ai_core.shared.validation import InvalidInputError
+
+
+class WorkflowPlanner(Protocol):
+    async def plan(self, query: RetrievalQuery) -> WorkflowPlan:
+        ...
 
 
 @dataclass(slots=True)
 class WorkflowEngine:
-    planning: WorkflowPlanningCapability
+    planning: WorkflowPlanner
     plan_compiler: WorkflowPlanCompiler
     step_executor: WorkflowStepExecutor
     host_action_results: HostActionResultService
@@ -41,7 +49,7 @@ class WorkflowEngine:
         ):
             raise InvalidInputError("max_tool_retries must be a non-negative integer.")
 
-    def prepare(self, state: WorkflowState) -> WorkflowState:
+    async def prepare(self, state: WorkflowState) -> WorkflowState:
         round_index = state.trace.rounds
         query = RetrievalQuery(
             text=state.task.request,
@@ -53,7 +61,7 @@ class WorkflowEngine:
                 metadata=dict(state.task.metadata),
             ),
         )
-        workflow_plan = self.planning.plan(query)
+        workflow_plan = await self.planning.plan(query)
         execution_plan = self.plan_compiler.compile(workflow_plan, query=query)
         execution_plan.round_index = round_index
         state.query = query
@@ -73,7 +81,7 @@ class WorkflowEngine:
         )
         return state
 
-    def replan(self, state: WorkflowState) -> WorkflowState:
+    async def replan(self, state: WorkflowState) -> WorkflowState:
         state.needs_replan = False
         state.retry_action_id = None
         state.failed_step_key = None
@@ -87,7 +95,7 @@ class WorkflowEngine:
         state.task.result = None
         state.task.status = TaskStatus.CLARIFICATION_REQUIRED
         state.task.analysis = TaskAnalysis(message="Task replanned.")
-        state = self.prepare(state)
+        state = await self.prepare(state)
         state.task.metadata.pop("workflow_feedback", None)
         if state.query is not None:
             state.query.request_context.metadata.pop("workflow_feedback", None)
@@ -109,7 +117,7 @@ class WorkflowEngine:
     def has_next_step(self, state: WorkflowState) -> bool:
         return state.plan is not None and state.next_step_index < len(state.plan.steps)
 
-    def run_step(
+    async def run_step(
         self,
         state: WorkflowState,
         *,
@@ -142,7 +150,7 @@ class WorkflowEngine:
         job.error = None
 
         try:
-            self.step_executor.execute(
+            await self.step_executor.execute(
                 state,
                 step.action_type,
                 step_query,
@@ -183,15 +191,13 @@ def _utc_timestamp() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _job_input(step: object) -> dict[str, object]:
+def _job_input(step: object) -> JsonObject:
     from foldmind_ai_core.core.application.workflows.state.execution import WorkflowStep
 
     if not isinstance(step, WorkflowStep):
         return {}
     return {
-        "artifact_refs": [
-            artifact.value for artifact in step.step_input.artifact_refs
-        ],
+        "artifact_refs": [artifact.value for artifact in step.step_input.artifact_refs],
         "options": dict(step.step_input.options),
     }
 
@@ -203,7 +209,7 @@ def _job_for_step(
     position: int,
     action_type: WorkflowActionType,
     reason: str,
-    input_json: dict[str, object],
+    input_json: JsonObject,
 ) -> TaskJob:
     for job in state.task.jobs:
         if job.round_index == round_index and job.position == position:

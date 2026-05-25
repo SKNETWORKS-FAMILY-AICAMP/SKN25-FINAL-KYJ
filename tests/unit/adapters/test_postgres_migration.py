@@ -7,8 +7,7 @@ from pathlib import Path
 def read_revision_with_sql_files(path: Path) -> str:
     sql_dir = Path("migrations/sql") / path.stem
     sql_text = "\n".join(
-        sql_path.read_text(encoding="utf-8")
-        for sql_path in sorted(sql_dir.glob("*.sql"))
+        sql_path.read_text(encoding="utf-8") for sql_path in sorted(sql_dir.glob("*.sql"))
     )
     return f"{path.read_text(encoding='utf-8')}\n{sql_text}"
 
@@ -26,6 +25,14 @@ class PostgresMigrationTests(unittest.TestCase):
             ],
         )
 
+    def test_migration_sql_has_no_trailing_table_commas(self) -> None:
+        for path in Path("migrations/sql").rglob("*.sql"):
+            with self.subTest(path=str(path)):
+                self.assertNotRegex(
+                    path.read_text(encoding="utf-8"),
+                    r",\s*\);",
+                )
+
     def test_initial_schema_matches_projection_storage_contract(self) -> None:
         migrations = {
             path.name: read_revision_with_sql_files(path)
@@ -34,7 +41,6 @@ class PostgresMigrationTests(unittest.TestCase):
         schema = migrations["20260513_0001_create_projection_storage.py"]
         workflow_schema = migrations["20260513_0002_create_task_storage.py"]
         all_schema = "\n".join(migrations.values())
-        normalized_schema = " ".join(schema.split())
 
         for table_name in (
             "tenant_storage_scopes",
@@ -74,7 +80,9 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("document_id text PRIMARY KEY", schema)
         self.assertIn("folder_id text PRIMARY KEY", schema)
         self.assertIn(
-            "tenant_id text NOT NULL\n        REFERENCES tenant_storage_scopes (tenant_id)\n        ON DELETE CASCADE",
+            "tenant_id text NOT NULL\n"
+            "        REFERENCES tenant_storage_scopes (tenant_id)\n"
+            "        ON DELETE CASCADE",
             schema,
         )
         self.assertIn(
@@ -100,41 +108,50 @@ class PostgresMigrationTests(unittest.TestCase):
             schema,
         )
         tenant_state_schema = schema[
-            schema.index("CREATE TABLE tenant_storage_scopes"):
-            schema.index("CREATE TABLE document_sources")
+            schema.index("CREATE TABLE tenant_storage_scopes") : schema.index(
+                "CREATE TABLE document_sources"
+            )
         ]
         self.assertNotIn("metadata", tenant_state_schema)
         document_source_schema = schema[
-            schema.index("CREATE TABLE document_sources"):
-            schema.index("CREATE TABLE folder_sources")
+            schema.index("CREATE TABLE document_sources") : schema.index(
+                "CREATE TABLE folder_sources"
+            )
         ]
         folder_source_schema = schema[
-            schema.index("CREATE TABLE folder_sources"):
-            schema.index("CREATE TABLE source_document_folder_relations")
+            schema.index("CREATE TABLE folder_sources") : schema.index(
+                "CREATE TABLE source_document_folder_relations"
+            )
         ]
         document_folder_relations_schema = schema[
-            schema.index("CREATE TABLE source_document_folder_relations"):
-            schema.index("CREATE TABLE document_index_records")
+            schema.index("CREATE TABLE source_document_folder_relations") : schema.index(
+                "CREATE TABLE document_index_records"
+            )
         ]
         document_index_schema = schema[
-            schema.index("CREATE TABLE document_index_records"):
-            schema.index("CREATE TABLE document_chunks")
+            schema.index("CREATE TABLE document_index_records") : schema.index(
+                "CREATE TABLE document_chunks"
+            )
         ]
         document_chunk_schema = schema[
-            schema.index("CREATE TABLE document_chunks"):
-            schema.index("CREATE TABLE document_signals")
+            schema.index("CREATE TABLE document_chunks") : schema.index(
+                "CREATE TABLE document_signals"
+            )
         ]
         document_signal_schema = schema[
-            schema.index("CREATE TABLE document_signals"):
-            schema.index("CREATE TABLE folder_index_records")
+            schema.index("CREATE TABLE document_signals") : schema.index(
+                "CREATE TABLE folder_index_records"
+            )
         ]
         folder_index_schema = schema[
-            schema.index("CREATE TABLE folder_index_records"):
-            schema.index("CREATE TABLE folder_signals")
+            schema.index("CREATE TABLE folder_index_records") : schema.index(
+                "CREATE TABLE folder_signals"
+            )
         ]
         folder_signal_schema = schema[
-            schema.index("CREATE TABLE folder_signals"):
-            schema.index("CREATE TABLE vector_projection_records")
+            schema.index("CREATE TABLE folder_signals") : schema.index(
+                "CREATE TABLE vector_projection_records"
+            )
         ]
         self.assertIn("title text NOT NULL DEFAULT ''", document_source_schema)
         self.assertIn("title_search_vector tsvector GENERATED ALWAYS AS", document_source_schema)
@@ -158,12 +175,21 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertNotIn("tag_ids", document_source_schema)
         self.assertIn("content_digest text NOT NULL", document_source_schema)
         self.assertIn("content_size_bytes bigint NOT NULL", document_source_schema)
+        self.assertIn("metadata_json jsonb NOT NULL", document_source_schema)
+        self.assertNotIn("\n    metadata jsonb", document_source_schema)
         self.assertIn("name text NOT NULL", folder_source_schema)
+        self.assertIn("name_search_vector tsvector GENERATED ALWAYS AS", folder_source_schema)
         self.assertIn("source_created_at timestamptz NOT NULL", folder_source_schema)
         self.assertIn("source_updated_at timestamptz NOT NULL", folder_source_schema)
         self.assertIn("path text CHECK", folder_source_schema)
         self.assertIn("parent_folder_id text CHECK", folder_source_schema)
         self.assertIn("description text NOT NULL DEFAULT ''", folder_source_schema)
+        self.assertIn(
+            "description_search_vector tsvector GENERATED ALWAYS AS",
+            folder_source_schema,
+        )
+        self.assertIn("metadata_json jsonb NOT NULL", folder_source_schema)
+        self.assertNotIn("\n    metadata jsonb", folder_source_schema)
         self.assertNotIn("snapshot_digest", folder_source_schema)
         self.assertNotIn("snapshot_size_bytes", folder_source_schema)
         self.assertNotIn("title text", document_index_schema)
@@ -200,7 +226,9 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("signal_generation_version text NOT NULL DEFAULT '1'", folder_index_schema)
         self.assertIn("folder_index_input_digest text NOT NULL", folder_index_schema)
         self.assertIn("folder_signal_input_digest text NOT NULL", folder_index_schema)
-        self.assertIn("folder_signal_refresh_status text NOT NULL DEFAULT 'empty'", folder_index_schema)
+        self.assertIn(
+            "folder_signal_refresh_status text NOT NULL DEFAULT 'empty'", folder_index_schema
+        )
         self.assertIn(
             "folder_signal_refresh_status IN ('empty', 'pending', 'ready', 'failed')",
             folder_index_schema,
@@ -240,8 +268,9 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertNotIn("scope_id", schema)
         self.assertNotIn("workspace", schema)
         vector_projection_schema = schema[
-            schema.index("CREATE TABLE vector_projection_records"):
-            schema.index("CREATE TABLE outbox_events")
+            schema.index("CREATE TABLE vector_projection_records") : schema.index(
+                "CREATE TABLE outbox_events"
+            )
         ]
         self.assertNotIn("vector_projection_id", vector_projection_schema)
         self.assertNotIn("aggregate_kind", vector_projection_schema)
@@ -260,20 +289,31 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("vector_input_digest text NOT NULL", vector_projection_schema)
         self.assertIn("PRIMARY KEY (collection_name, point_id)", vector_projection_schema)
         self.assertIn(
-            "tenant_id,\n        collection_name,\n        source_kind,\n        source_id,\n        vector_item_kind,\n        vector_item_id",
+            "tenant_id,\n"
+            "        collection_name,\n"
+            "        source_kind,\n"
+            "        source_id,\n"
+            "        vector_item_kind,\n"
+            "        vector_item_id",
             vector_projection_schema,
         )
         self.assertNotIn("UNIQUE (collection_name, point_id)", schema)
         self.assertNotIn("UNIQUE (tenant_id, collection_name, point_id)", schema)
-        self.assertNotIn("FOREIGN KEY (collection_name, vector_item_kind)", vector_projection_schema)
-        self.assertNotIn("FOREIGN KEY (collection_name, vector_kind)", vector_projection_schema)
+        self.assertNotIn(
+            "FOREIGN KEY (collection_name, vector_item_kind)", vector_projection_schema
+        )
+        self.assertNotIn(
+            "FOREIGN KEY (collection_name, vector_kind)",
+            vector_projection_schema,
+        )
         self.assertNotIn(
             "FOREIGN KEY (tenant_id, vector_kind, collection_name)",
             vector_projection_schema,
         )
         self.assertNotIn("tenant_vector_collection_bindings", vector_projection_schema)
         self.assertIn(
-            "source_kind = 'document'\n            AND vector_item_kind IN ('document', 'chunk', 'signal')",
+            "source_kind = 'document'\n"
+            "            AND vector_item_kind IN ('document', 'chunk', 'signal')",
             vector_projection_schema,
         )
         self.assertIn(
@@ -281,7 +321,8 @@ class PostgresMigrationTests(unittest.TestCase):
             vector_projection_schema,
         )
         self.assertIn(
-            "vector_item_kind IN ('document', 'folder')\n            AND vector_item_id = source_id",
+            "vector_item_kind IN ('document', 'folder')\n"
+            "            AND vector_item_id = source_id",
             vector_projection_schema,
         )
         self.assertNotIn("REFERENCES document_index_records", vector_projection_schema)
@@ -293,6 +334,15 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("vector_projection_source_idx", schema)
         self.assertNotIn("source_document_folder_relation_state_tenant_updated_idx", schema)
         self.assertIn("source_document_folder_relations_folder_idx", schema)
+        self.assertIn("folder_sources_parent_idx", schema)
+        self.assertIn("ON folder_sources (tenant_id, parent_folder_id)", schema)
+        self.assertIn("folder_sources_name_search_idx", schema)
+        self.assertIn("ON folder_sources USING gin (name_search_vector)", schema)
+        self.assertIn("folder_sources_description_search_idx", schema)
+        self.assertIn(
+            "ON folder_sources USING gin (description_search_vector)",
+            schema,
+        )
         self.assertIn("document_index_records_retention_idx", schema)
         self.assertNotIn("document_chunks_document_idx", schema)
         self.assertIn(
@@ -380,7 +430,9 @@ class PostgresMigrationTests(unittest.TestCase):
 
         self.assertIn("task_id uuid PRIMARY KEY", workflow_schema)
         self.assertIn(
-            "tenant text NOT NULL\n        REFERENCES tenant_storage_scopes (tenant_id)\n        ON DELETE CASCADE",
+            "tenant text NOT NULL\n"
+            "        REFERENCES tenant_storage_scopes (tenant_id)\n"
+            "        ON DELETE CASCADE",
             workflow_schema,
         )
         self.assertIn("request_text text NOT NULL", workflow_schema)
@@ -394,6 +446,8 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("round_index integer NOT NULL", workflow_schema)
         self.assertIn("job_result_id uuid PRIMARY KEY", workflow_schema)
         self.assertIn("summary_json jsonb NOT NULL", workflow_schema)
+        self.assertIn("metadata_json jsonb NOT NULL", workflow_schema)
+        self.assertNotIn("\n    metadata jsonb", workflow_schema)
         self.assertIn("result_type text CHECK", workflow_schema)
         self.assertIn("result_json jsonb CHECK", workflow_schema)
         self.assertIn("job_id uuid,", workflow_schema)
@@ -406,12 +460,13 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("UNIQUE (job_id, position)", workflow_schema)
         self.assertIn("FOREIGN KEY (task_id, job_id)", workflow_schema)
         self.assertIn("ON DELETE SET NULL (job_id)", workflow_schema)
-        self.assertIn("completed_at IS NULL", workflow_schema)
+        self.assertNotIn("completed_at IS NULL", workflow_schema)
         self.assertIn("status = 'failed'", workflow_schema)
         self.assertIn("AND error_json IS NOT NULL", workflow_schema)
         host_action_schema = workflow_schema[
-            workflow_schema.index("CREATE TABLE host_actions"):
-            workflow_schema.index("-- tasks_current_action_id_fk")
+            workflow_schema.index("CREATE TABLE host_actions") : workflow_schema.index(
+                "-- tasks_current_action_id_fk"
+            )
         ]
         self.assertNotIn("result_json", host_action_schema)
         self.assertNotIn("CREATE TABLE host_action_dependencies", workflow_schema)

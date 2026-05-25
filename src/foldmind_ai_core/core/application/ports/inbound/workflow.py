@@ -2,34 +2,40 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from foldmind_ai_core.core.application.commands.workflow import (
+from foldmind_ai_core.core.application.models.task_commands import (
     AppendTaskInputCommand,
     CreateTaskCommand,
     GetTaskQuery,
     RecordActionResultCommand,
     RemoveTaskInputCommand,
 )
-from foldmind_ai_core.core.application.results.workflow import (
+from foldmind_ai_core.core.application.models.task_results import (
     RecordActionResult,
-    TaskResult,
 )
+from foldmind_ai_core.core.domain.models.tasks import TaskSnapshot
 
 
-class RunTaskInboundPort(Protocol):
-    def execute(self, command: CreateTaskCommand | AppendTaskInputCommand) -> TaskResult:
+class TaskWorkflowServicePort(Protocol):
+    async def create_task(self, command: CreateTaskCommand) -> TaskSnapshot:
         ...
 
-
-class GetTaskInboundPort(Protocol):
-    def execute(self, query: GetTaskQuery) -> TaskResult:
+    async def append_task_input(
+        self,
+        command: AppendTaskInputCommand,
+    ) -> TaskSnapshot:
         ...
 
-
-class RemoveTaskInputInboundPort(Protocol):
-    def execute(self, command: RemoveTaskInputCommand) -> TaskResult:
+    async def get_task(self, query: GetTaskQuery) -> TaskSnapshot:
         ...
 
+    async def remove_task_input(
+        self,
+        command: RemoveTaskInputCommand,
+    ) -> TaskSnapshot:
+        ...
 
-class RecordActionResultInboundPort(Protocol):
-    def execute(self, command: RecordActionResultCommand) -> RecordActionResult:
+    async def record_action_result(
+        self,
+        command: RecordActionResultCommand,
+    ) -> RecordActionResult:
         ...

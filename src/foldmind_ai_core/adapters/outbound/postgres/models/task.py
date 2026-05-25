@@ -1,82 +1,123 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
 
-from foldmind_ai_core.shared.types import JsonObject
+from sqlalchemy import DateTime, Integer, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
-
-@dataclass(frozen=True, slots=True)
-class PostgresTaskRecord:
-    task_id: str
-    tenant: str
-    request_text: str
-    context_json: JsonObject
-    status: str
-    analysis_message: str
-    result_type: str | None = None
-    result_json: JsonObject | None = None
-    result_title: str | None = None
-    result_metadata: JsonObject = field(default_factory=dict)
-    current_action_id: str | None = None
-    error_json: JsonObject | None = None
-    metadata: JsonObject = field(default_factory=dict)
+from foldmind_ai_core.adapters.outbound.postgres.models.base import (
+    CreatedAndUpdatedAtColumns,
+    CreatedAtColumn,
+    PostgresOrmBase,
+)
 
 
-@dataclass(frozen=True, slots=True)
-class PostgresTaskInputRecord:
-    task_input_id: str
-    task_id: str
-    input_text: str
-    context_json: JsonObject
-    position: int
-    status: str
+class TaskRow(CreatedAndUpdatedAtColumns, PostgresOrmBase):
+    __tablename__ = "tasks"
+
+    task_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    tenant: Mapped[str] = mapped_column(Text, nullable=False)
+    request_text: Mapped[str] = mapped_column(Text, nullable=False)
+    context_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    analysis_message: Mapped[str] = mapped_column(Text, nullable=False)
+    result_type: Mapped[str | None] = mapped_column(Text)
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    result_title: Mapped[str | None] = mapped_column(Text)
+    result_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    current_action_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    error_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-@dataclass(frozen=True, slots=True)
-class PostgresTaskJobRecord:
-    job_id: str
-    task_id: str
-    round_index: int
-    position: int
-    job_type: str
-    status: str
-    reason: str
-    input_json: JsonObject
-    started_at: str | None = None
-    finished_at: str | None = None
-    error_json: JsonObject | None = None
-    metadata: JsonObject = field(default_factory=dict)
+class TaskInputRow(CreatedAtColumn, PostgresOrmBase):
+    __tablename__ = "task_inputs"
+
+    task_input_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    task_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    context_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-@dataclass(frozen=True, slots=True)
-class PostgresTaskJobResultRecord:
-    job_result_id: str
-    job_id: str
-    position: int
-    result_type: str
-    result_json: JsonObject
-    summary_json: JsonObject
-    metadata: JsonObject = field(default_factory=dict)
+class TaskJobRow(CreatedAtColumn, PostgresOrmBase):
+    __tablename__ = "task_jobs"
+
+    job_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    task_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    round_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    job_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    input_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
-@dataclass(frozen=True, slots=True)
-class PostgresHostActionRecord:
-    action_id: str
-    job_id: str | None
-    action_type: str
-    summary: str
-    input_json: JsonObject
-    reason: str
-    status: str
-    attempts: int
-    policy_json: JsonObject
-    metadata: JsonObject = field(default_factory=dict)
+class TaskJobResultRow(CreatedAtColumn, PostgresOrmBase):
+    __tablename__ = "task_job_results"
+
+    job_result_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    job_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    result_type: Mapped[str] = mapped_column(Text, nullable=False)
+    result_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    summary_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
-@dataclass(frozen=True, slots=True)
-class PostgresTaskEventRecord:
-    event_id: str
-    event_type: str
-    message: str
-    job_id: str | None = None
-    data_json: JsonObject = field(default_factory=dict)
+class HostActionRow(CreatedAndUpdatedAtColumns, PostgresOrmBase):
+    __tablename__ = "host_actions"
+
+    action_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    task_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    job_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    action_type: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    input_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class TaskEventRow(CreatedAtColumn, PostgresOrmBase):
+    __tablename__ = "task_events"
+
+    event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    task_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    job_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    data_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )

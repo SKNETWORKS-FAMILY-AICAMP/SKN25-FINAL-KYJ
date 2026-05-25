@@ -2,25 +2,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from foldmind_ai_core.core.application.workflows.state.execution import (
-    StepOutcome,
-    WorkflowArtifactName,
-)
-from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
+from foldmind_ai_core.core.application.prompts import PROMPT_SUMMARIZATION
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
 from foldmind_ai_core.core.application.workflows.option_values import (
     bool_option,
     instruction_option,
     optional_text_option,
     positive_int_option,
 )
-from foldmind_ai_core.core.application.services.prompts import PROMPT_SUMMARIZATION
-from foldmind_ai_core.core.domain.models.generation.results import GeneratedTextResult
-from foldmind_ai_core.core.application.queries.retrieval import RetrievalQuery
-from foldmind_ai_core.core.application.factories.retrieval_results import (
-    folder_search_results_to_domain,
-    retrieved_chunk_result_to_domain,
-    signal_search_results_to_domain,
+from foldmind_ai_core.core.application.workflows.state.execution import (
+    StepOutcome,
+    WorkflowArtifactName,
 )
+from foldmind_ai_core.core.application.workflows.state.workflow_state import WorkflowState
 from foldmind_ai_core.core.application.workflows.steps.retrieval_artifacts import (
     candidate_documents,
     document_retrieval_or_search,
@@ -38,26 +32,24 @@ from foldmind_ai_core.core.application.workflows.steps.retrieval_artifacts impor
     signal_search_result,
     signal_synthesis_instruction,
 )
+from foldmind_ai_core.core.application.models.generation import GeneratedTextResult
 from foldmind_ai_core.shared.types import JsonObject
 
 if TYPE_CHECKING:
     from foldmind_ai_core.core.application.workflows.steps.executor import WorkflowStepExecutor
 
 
-def find_documents(
+async def find_documents(
     ctx: WorkflowStepExecutor,
     _state: WorkflowState,
     query: RetrievalQuery,
     options: JsonObject,
 ) -> StepOutcome:
-    result = ctx.find_documents.execute(
+    result = await ctx.document_search.search(
         query,
         require_comprehensive_search=bool_option(options, "require_comprehensive_search"),
     )
-    results = [
-        retrieved_chunk_result_to_domain(item)
-        for item in result.results
-    ]
+    results = list(result)
     return StepOutcome(
         artifacts={
             WorkflowArtifactName.DOCUMENT_RETRIEVAL: results,
@@ -66,14 +58,14 @@ def find_documents(
     )
 
 
-def find_folders(
+async def find_folders(
     ctx: WorkflowStepExecutor,
     _state: WorkflowState,
     query: RetrievalQuery,
     _options: JsonObject,
 ) -> StepOutcome:
-    folders = folder_search_results_to_domain(
-        ctx.find_folders.execute(folder_search_query_from_retrieval_query(query))
+    folders = list(
+        await ctx.folder_search.search(folder_search_query_from_retrieval_query(query))
     )
     return StepOutcome(
         artifacts={
@@ -82,14 +74,14 @@ def find_folders(
     )
 
 
-def find_signals(
+async def find_signals(
     ctx: WorkflowStepExecutor,
     _state: WorkflowState,
     query: RetrievalQuery,
     options: JsonObject,
 ) -> StepOutcome:
-    signals = signal_search_results_to_domain(
-        ctx.find_signals.execute(
+    signals = list(
+        await ctx.signal_search.search(
             query,
             signal_type=optional_text_option(options, "signal_type"),
             top_k=positive_int_option(options, "top_k", default=20),
@@ -102,13 +94,13 @@ def find_signals(
     )
 
 
-def present_signals(
+async def present_signals(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
     _options: JsonObject,
 ) -> StepOutcome:
-    result = signal_search_result(ctx, state, query)
+    result = await signal_search_result(ctx, state, query)
     return StepOutcome(
         artifacts={
             WorkflowArtifactName.SIGNAL_SEARCH_RESULT: result,
@@ -117,13 +109,13 @@ def present_signals(
     )
 
 
-def expand_signal_evidence(
+async def expand_signal_evidence(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
     _options: JsonObject,
 ) -> StepOutcome:
-    signals = signal_retrieval_or_search(ctx, state, query)
+    signals = await signal_retrieval_or_search(ctx, state, query)
     evidence = signal_evidence_from_results(signals)
     return StepOutcome(
         artifacts={
@@ -132,14 +124,14 @@ def expand_signal_evidence(
     )
 
 
-def find_related(
+async def find_related(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
     _options: JsonObject,
 ) -> StepOutcome:
-    documents = document_retrieval_or_search(ctx, state, query)
-    folders = folder_retrieval_or_search(ctx, state, query)
+    documents = await document_retrieval_or_search(ctx, state, query)
+    folders = await folder_retrieval_or_search(ctx, state, query)
     result = related_retrieval(documents, folders)
     return StepOutcome(
         artifacts={
@@ -148,13 +140,13 @@ def find_related(
     )
 
 
-def present_documents(
+async def present_documents(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
     _options: JsonObject,
 ) -> StepOutcome:
-    result = document_search_result(ctx, state, query)
+    result = await document_search_result(ctx, state, query)
     return StepOutcome(
         artifacts={
             WorkflowArtifactName.DOCUMENT_SEARCH_RESULT: result,
@@ -163,18 +155,18 @@ def present_documents(
     )
 
 
-def synthesize_signals(
+async def synthesize_signals(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
     options: JsonObject,
 ) -> StepOutcome:
-    signals = signal_retrieval_or_search(ctx, state, query)
+    signals = await signal_retrieval_or_search(ctx, state, query)
     if not signals:
         result = GeneratedTextResult(text="관련 signal을 찾지 못했습니다.", citations=[])
     else:
         evidence = signal_evidence_or_expand(ctx, state, signals)
-        result = ctx.context_generator.generate(
+        result = await ctx.context_generator.generate(
             prompt_name=PROMPT_SUMMARIZATION,
             instruction=signal_synthesis_instruction(
                 instruction=instruction_option(options),
@@ -190,7 +182,7 @@ def synthesize_signals(
     )
 
 
-def extract_on_demand_signals(
+async def extract_on_demand_signals(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     query: RetrievalQuery,
@@ -203,8 +195,8 @@ def extract_on_demand_signals(
     if len(existing) >= min_signal_count:
         signals = existing
     else:
-        indexed_signals = signal_search_results_to_domain(
-            ctx.find_signals.execute(
+        indexed_signals = list(
+            await ctx.signal_search.search(
                 query,
                 signal_type=signal_type,
                 top_k=top_k,
@@ -213,7 +205,7 @@ def extract_on_demand_signals(
         signals = merge_signal_results(
             existing,
             indexed_signals,
-            on_demand_signals_from_documents(
+            await on_demand_signals_from_documents(
                 ctx,
                 state,
                 query,
@@ -243,7 +235,7 @@ def classify_documents(
     )
 
 
-def analyze_documents(
+async def analyze_documents(
     ctx: WorkflowStepExecutor,
     state: WorkflowState,
     _query: RetrievalQuery,
@@ -251,11 +243,10 @@ def analyze_documents(
 ) -> StepOutcome:
     return StepOutcome(
         artifacts={
-            WorkflowArtifactName.DOCUMENT_SUMMARIES: document_summaries(
+            WorkflowArtifactName.DOCUMENT_SUMMARIES: await document_summaries(
                 ctx,
                 state,
                 instruction=instruction_option(options),
             ),
         }
     )
-

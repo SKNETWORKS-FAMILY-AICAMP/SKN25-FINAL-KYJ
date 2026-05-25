@@ -6,6 +6,7 @@ from pydantic import Field
 
 from foldmind_ai_core.adapters.inbound.http.dtos.dto_model import APIDTO
 
+
 class RetrievalResultDTO(APIDTO):
     tenant: str
     document_type: str | None
@@ -20,11 +21,6 @@ class RetrievalResultDTO(APIDTO):
     start_offset: int
     end_offset: int
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class GeneratedTextResponse(APIDTO):
-    text: str
-    citations: list[RetrievalResultDTO] = Field(default_factory=list)
 
 
 class FolderRecommendationDTO(APIDTO):

@@ -1,29 +1,34 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import asynccontextmanager
+from datetime import datetime
 
 from foldmind_ai_core.core.application.errors import ProviderContractError
-from foldmind_ai_core.core.application.projections.vector import DocumentVectorProjection
-from foldmind_ai_core.core.application.services.document_retrieval_policy import (
-    DocumentRetrievalConfig,
-    rank_document_candidates,
-)
-from foldmind_ai_core.core.application.services.document_retrieval_service import (
-    DocumentRetrievalService,
-)
-from foldmind_ai_core.core.application.services.relationship_scope_resolver import (
-    RelationshipScopeResolver,
-)
-from foldmind_ai_core.core.application.use_cases.retrieval.find_documents import FindDocumentsUseCase
-from foldmind_ai_core.core.application.queries.retrieval import (
+from foldmind_ai_core.core.application.models.vector_projection import DocumentVectorProjection
+from foldmind_ai_core.core.application.models.search import (
     RequestContext,
-    RetrievalQuery,
     SearchScope,
     SearchSort,
-    TimestampRange,
 )
-from foldmind_ai_core.core.domain.models.indexing.chunks import DocumentChunk
-from foldmind_ai_core.core.domain.models.retrieval.results import (
+from foldmind_ai_core.core.application.models.retrieval import RetrievalQuery
+from foldmind_ai_core.core.application.models.retrieval import DocumentTitleKeywordMatch
+from foldmind_ai_core.core.application.services.retrieval.document_retrieval_service import (
+    DocumentRetrievalService,
+)
+from foldmind_ai_core.core.application.services.retrieval.document_search_service import (
+    DocumentSearchService,
+)
+from foldmind_ai_core.core.application.services.retrieval.policy import (
+    DocumentRetrievalConfig,
+    DocumentRetrievalPolicy,
+)
+from foldmind_ai_core.core.application.services.retrieval.scope_resolver import (
+    RelationshipScopeResolver,
+)
+from foldmind_ai_core.core.domain.models.document_chunks import DocumentChunk
+from foldmind_ai_core.core.domain.models.document_sources import DocumentSourceState
+from foldmind_ai_core.core.application.models.retrieval import (
     DocumentRetrievalResult,
     RetrievalResult,
     RetrievedDocument,
@@ -109,6 +114,7 @@ class FakeDocumentVectorStores:
     def delete_document_chunks(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Document chunk deletes are not expected in these tests.")
@@ -116,6 +122,7 @@ class FakeDocumentVectorStores:
     def delete_document_vector(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Document vector deletes are not expected in these tests.")
@@ -153,21 +160,146 @@ class FakeDocumentVectorStores:
         )
 
 
-class FakeKeywordSearchStore:
-    def __init__(self, results: list[RetrievalResult]) -> None:
-        self.results = results
-        self.scopes: list[SearchScope | None] = []
+class FakeDocumentSourceRepository:
+    def __init__(
+        self,
+        *,
+        title_matches: tuple[DocumentTitleKeywordMatch, ...] = (),
+    ) -> None:
+        self.title_matches = title_matches
 
-    def search_chunks(
+    async def get_current_document_sources(
+        self,
+        *,
+        tenant: str,
+        document_ids: tuple[str, ...],
+    ) -> tuple[DocumentSourceState, ...]:
+        return tuple(
+            DocumentSourceState(
+                tenant=tenant,
+                document_type="document",
+                document_id=document_id,
+                source_version="v1",
+                title=document_id,
+                created_at="2026-05-01T10:00:00+09:00",
+                updated_at="2026-05-02T11:00:00+09:00",
+                content_digest=f"content-digest-{document_id}",
+                content_size_bytes=len(document_id.encode("utf-8")),
+            )
+            for document_id in document_ids
+        )
+
+    async def document_ids_for_scope(
+        self,
+        *,
+        tenant: str,
+        document_type: str | None,
+        document_id: str | None,
+        document_ids: tuple[str, ...],
+        created_at: datetime | None,
+        updated_at: datetime | None,
+        metadata_filter: dict[str, object] | None,
+    ) -> tuple[str, ...]:
+        if document_ids:
+            return document_ids
+        if document_id is not None:
+            return (document_id,)
+        return ()
+
+    async def search_titles_by_keyword(
         self,
         *,
         tenant: str,
         query_text: str,
         top_k: int,
-        scope: SearchScope | None = None,
-    ) -> list[RetrievalResult]:
-        self.scopes.append(scope)
-        return self.results[:top_k]
+        document_type: str | None,
+        document_id: str | None,
+        document_ids: tuple[str, ...],
+        created_at: datetime | None,
+        updated_at: datetime | None,
+        metadata_filter: dict[str, object] | None,
+    ) -> tuple[tuple[DocumentSourceState, float], ...]:
+        return tuple((match.source, match.score) for match in self.title_matches[:top_k])
+
+
+class FakeDocumentProjectionRepository:
+    def __init__(
+        self,
+        *,
+        title_chunks: tuple[DocumentChunk, ...] = (),
+        chunk_results: list[RetrievalResult] | None = None,
+    ) -> None:
+        self.title_chunks = title_chunks
+        self.chunk_results = chunk_results or []
+        self.scopes: list[SearchScope] = []
+
+    async def get_first_chunks_for_documents(
+        self,
+        *,
+        tenant: str,
+        document_ids: tuple[str, ...],
+        limit: int,
+    ) -> tuple[DocumentChunk, ...]:
+        document_id_set = set(document_ids)
+        return tuple(
+            chunk
+            for chunk in self.title_chunks
+            if chunk.document_id in document_id_set
+        )[:limit]
+
+    async def search_chunks_by_keyword(
+        self,
+        *,
+        tenant: str,
+        query_text: str,
+        top_k: int,
+        document_id: str | None,
+        document_ids: tuple[str, ...],
+    ) -> tuple[tuple[DocumentChunk, float], ...]:
+        self.scopes.append(SearchScope(document_id=document_id, document_ids=document_ids))
+        return tuple(
+            (result.chunk, result.score)
+            for result in self.chunk_results[:top_k]
+        )
+
+
+class FakeDocumentRelationRepository:
+    async def document_ids_for_folders(
+        self,
+        *,
+        tenant: str,
+        folder_ids: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return ()
+
+
+class FakeRetrievalReadSession:
+    def __init__(
+        self,
+        document_sources: FakeDocumentSourceRepository,
+        document_projections: FakeDocumentProjectionRepository,
+    ) -> None:
+        self.document_sources = document_sources
+        self.document_projections = document_projections
+        self.document_relations = FakeDocumentRelationRepository()
+        self.folder_sources = object()
+
+
+class FakeRetrievalReadSessionProvider:
+    def __init__(
+        self,
+        document_sources: FakeDocumentSourceRepository,
+        document_projections: FakeDocumentProjectionRepository,
+    ) -> None:
+        self.document_sources = document_sources
+        self.document_projections = document_projections
+
+    @asynccontextmanager
+    async def session(self):
+        yield FakeRetrievalReadSession(
+            self.document_sources,
+            self.document_projections,
+        )
 
 
 class FakeGraphStore:
@@ -200,19 +332,21 @@ class FakeGraphStore:
     def delete_document(
         self,
         *,
+        tenant: str,
         document_id: str,
     ) -> None:
         raise AssertionError("Graph document deletes are not expected in these tests.")
 
-    def delete_folder(self, *, folder_id: str) -> None:
+    def delete_folder(self, *, tenant: str, folder_id: str) -> None:
         raise AssertionError("Graph folder deletes are not expected in these tests.")
 
-    def delete_folder_signals(self, *, folder_id: str) -> None:
+    def delete_folder_signals(self, *, tenant: str, folder_id: str) -> None:
         raise AssertionError("Folder signal deletes are not expected in these tests.")
 
     def delete_stale_folder_signals(
         self,
         *,
+        tenant: str,
         folder_id: str,
         current_folder_signal_input_digest: str,
     ) -> None:
@@ -242,23 +376,6 @@ class FakeGraphStore:
         return {}
 
 
-class FakeRelevanceValidator:
-    def __init__(self, allowed_chunk_ids: set[str]) -> None:
-        self.allowed_chunk_ids = allowed_chunk_ids
-
-    def filter(
-        self,
-        *,
-        query: RetrievalQuery,
-        results: list[RetrievalResult],
-    ) -> list[RetrievalResult]:
-        return [
-            result
-            for result in results
-            if result.chunk.chunk_id in self.allowed_chunk_ids
-        ]
-
-
 def make_document(
     document_id: str,
     score_text: str = "",
@@ -276,6 +393,20 @@ def make_document(
     )
 
 
+def make_source_record(document_id: str) -> DocumentSourceState:
+    return DocumentSourceState(
+        tenant="tenant-1",
+        document_type="document",
+        document_id=document_id,
+        source_version="v1",
+        title=document_id,
+        created_at="2026-05-01T10:00:00+09:00",
+        updated_at="2026-05-02T11:00:00+09:00",
+        content_digest=f"content-digest-{document_id}",
+        content_size_bytes=len(document_id.encode("utf-8")),
+    )
+
+
 def make_result(document_id: str, chunk_id: str, score: float) -> RetrievalResult:
     text = f"{document_id} startup evidence"
     return RetrievalResult(
@@ -289,43 +420,40 @@ def make_result(document_id: str, chunk_id: str, score: float) -> RetrievalResul
             updated_at="2026-05-02T11:00:00+09:00",
             chunk_id=chunk_id,
             chunk_index=0,
-            chunking_version="chunking-test-v1",
             text=text,
-            text_hash="hash-1",
             start_offset=0,
             end_offset=len(text),
-            embedding_model="test-embedding",
-            embedding_version="test-v1",
-            index_schema_version="schema-v1",
         ),
         score=score,
     )
 
 
-def make_find_documents_use_case(
+def make_document_search_service(
     *,
     embeddings: FakeEmbeddingProvider,
     documents: FakeDocumentVectorStores,
     graph: FakeGraphStore,
-    result_filter: FakeRelevanceValidator | None = None,
-    keyword_chunks: FakeKeywordSearchStore | None = None,
+    document_sources: FakeDocumentSourceRepository | None = None,
+    document_projections: FakeDocumentProjectionRepository | None = None,
     config: DocumentRetrievalConfig,
-) -> FindDocumentsUseCase:
-    return FindDocumentsUseCase(
+) -> DocumentSearchService:
+    return DocumentSearchService(
         retrieval=DocumentRetrievalService(
             embeddings=embeddings,
             chunk_vectors=documents,
             document_vectors=documents,
             graph=graph,
-            keyword_chunks=keyword_chunks,
+            retrieval_reads=FakeRetrievalReadSessionProvider(
+                document_sources or FakeDocumentSourceRepository(),
+                document_projections or FakeDocumentProjectionRepository(),
+            ),
             config=config,
         ),
         scope_resolver=RelationshipScopeResolver(graph=graph),
-        result_filter=result_filter,
     )
 
 
-class DocumentRetrievalTests(unittest.TestCase):
+class DocumentRetrievalTests(unittest.IsolatedAsyncioTestCase):
     def test_document_retrieval_config_rejects_malformed_numeric_options(self) -> None:
         with self.assertRaises(InvalidInputError):
             DocumentRetrievalConfig(top_k=True)
@@ -339,21 +467,24 @@ class DocumentRetrievalTests(unittest.TestCase):
             DocumentRetrievalConfig(both_sources_bonus=float("nan"))
 
     def test_duplicate_document_candidates_do_not_count_as_distinct_sources(self) -> None:
-        ranked = rank_document_candidates(
+        ranked = DocumentRetrievalPolicy(
+            DocumentRetrievalConfig(both_sources_bonus=0.15)
+        ).rank_document_candidates(
             document_results=[
                 DocumentRetrievalResult(document=make_document("doc-a"), score=0.4),
                 DocumentRetrievalResult(document=make_document("doc-a"), score=0.3),
                 DocumentRetrievalResult(document=make_document("doc-b"), score=0.9),
             ],
             graph_results=[],
-            both_sources_bonus=0.15,
         )
 
         self.assertEqual([result.document.document_id for result in ranked], ["doc-b", "doc-a"])
         self.assertEqual(ranked[1].score, 0.4)
 
     def test_document_candidates_ignore_blank_ids_and_non_finite_scores(self) -> None:
-        ranked = rank_document_candidates(
+        ranked = DocumentRetrievalPolicy(
+            DocumentRetrievalConfig(both_sources_bonus=0.15)
+        ).rank_document_candidates(
             document_results=[
                 DocumentRetrievalResult(document=make_document(" "), score=0.9),
                 DocumentRetrievalResult(
@@ -368,7 +499,6 @@ class DocumentRetrievalTests(unittest.TestCase):
                     score=float("inf"),
                 )
             ],
-            both_sources_bonus=0.15,
         )
 
         self.assertEqual(
@@ -376,7 +506,33 @@ class DocumentRetrievalTests(unittest.TestCase):
             ["doc-valid"],
         )
 
-    def test_chunk_results_ignore_blank_ids_and_non_finite_scores(self) -> None:
+    async def test_blank_document_search_returns_empty_result_without_provider_call(
+        self,
+    ) -> None:
+        embeddings = FakeEmbeddingProvider()
+        chunks = CapturingChunkVectorStore([make_result("doc-valid", "chunk-1", 0.7)])
+        document_port = FakeDocumentVectorStores(chunks=chunks)
+
+        results = await make_document_search_service(
+            embeddings=embeddings,
+            documents=document_port,
+            graph=FakeGraphStore([]),
+            config=DocumentRetrievalConfig(top_k=3),
+        ).search(
+            RetrievalQuery(
+                text="   ",
+                request_context=RequestContext(
+                    tenant="tenant-1",
+                    requested_at="2026-05-17T09:30:00+09:00",
+                ),
+            )
+        )
+
+        self.assertEqual(results, ())
+        self.assertEqual(embeddings.calls, 0)
+        self.assertEqual(chunks.scopes, [])
+
+    async def test_chunk_results_ignore_blank_ids_and_non_finite_scores(self) -> None:
         chunks = CapturingChunkVectorStore(
             [
                 make_result(" ", "blank:chunk:0", 0.9),
@@ -386,22 +542,29 @@ class DocumentRetrievalTests(unittest.TestCase):
         )
         document_port = FakeDocumentVectorStores(chunks=chunks)
 
-        results = make_find_documents_use_case(
+        results = await make_document_search_service(
             embeddings=FakeEmbeddingProvider(),
             documents=document_port,
             graph=FakeGraphStore([]),
             config=DocumentRetrievalConfig(top_k=3),
-        ).execute(
-            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
-        ).results
+        ).search(
+            RetrievalQuery(
+                text="창업 관련 문서",
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
+            )
+        )
 
         self.assertEqual(
-            [result.document_id for result in results],
+            [result.chunk.document_id for result in results],
             ["doc-valid"],
         )
 
     def test_document_candidates_receive_cross_source_bonus_once(self) -> None:
-        ranked = rank_document_candidates(
+        ranked = DocumentRetrievalPolicy(
+            DocumentRetrievalConfig(both_sources_bonus=0.15)
+        ).rank_document_candidates(
             document_results=[
                 DocumentRetrievalResult(document=make_document("doc-a"), score=0.5),
             ],
@@ -409,14 +572,33 @@ class DocumentRetrievalTests(unittest.TestCase):
                 DocumentRetrievalResult(document=make_document("doc-a"), score=0.7),
                 DocumentRetrievalResult(document=make_document("doc-a"), score=0.6),
             ],
-            both_sources_bonus=0.15,
         )
 
         self.assertEqual(len(ranked), 1)
         self.assertEqual(ranked[0].document.document_id, "doc-a")
         self.assertEqual(ranked[0].score, 0.85)
 
-    def test_qdrant_documents_and_graph_candidates_constrain_chunk_search(self) -> None:
+    def test_document_candidate_ties_keep_first_source_order(self) -> None:
+        ranked = DocumentRetrievalPolicy(
+            DocumentRetrievalConfig(both_sources_bonus=0.0)
+        ).rank_document_candidates(
+            document_results=[
+                DocumentRetrievalResult(document=make_document("doc-a"), score=0.7),
+                DocumentRetrievalResult(document=make_document("doc-b"), score=0.7),
+            ],
+            graph_results=[
+                DocumentRetrievalResult(document=make_document("doc-c"), score=0.7),
+            ],
+        )
+
+        self.assertEqual(
+            [result.document.document_id for result in ranked],
+            ["doc-a", "doc-b", "doc-c"],
+        )
+
+    async def test_qdrant_documents_and_graph_candidates_constrain_chunk_search(
+        self,
+    ) -> None:
         chunks = CapturingChunkVectorStore(
             [
                 make_result("doc-a", "doc-a:chunk:0", 0.9),
@@ -430,24 +612,30 @@ class DocumentRetrievalTests(unittest.TestCase):
                 [DocumentRetrievalResult(document=make_document("doc-a"), score=0.7)]
             ),
         )
-        results = make_find_documents_use_case(
+        results = await make_document_search_service(
             embeddings=FakeEmbeddingProvider(),
             documents=document_port,
             graph=FakeGraphStore(
                 [DocumentRetrievalResult(document=make_document("doc-b"), score=0.6)]
             ),
             config=DocumentRetrievalConfig(top_k=2),
-        ).execute(
-            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
-        ).results
+        ).search(
+            RetrievalQuery(
+                text="창업 관련 문서",
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
+            )
+        )
 
-        self.assertEqual([result.document_id for result in results], ["doc-a", "doc-b"])
+        self.assertEqual(
+            [result.chunk.document_id for result in results],
+            ["doc-a", "doc-b"],
+        )
         self.assertEqual(chunks.scopes[0].document_ids, ("doc-a", "doc-b"))
 
-    def test_explicit_document_scope_is_not_replaced_by_candidates(self) -> None:
-        chunks = CapturingChunkVectorStore(
-            [make_result("doc-a", "doc-a:chunk:0", 0.9)]
-        )
+    async def test_explicit_document_scope_is_not_replaced_by_candidates(self) -> None:
+        chunks = CapturingChunkVectorStore([make_result("doc-a", "doc-a:chunk:0", 0.9)])
         document_port = FakeDocumentVectorStores(
             chunks=chunks,
             documents=FakeDocumentVectorStore(
@@ -460,17 +648,19 @@ class DocumentRetrievalTests(unittest.TestCase):
             ),
         )
 
-        make_find_documents_use_case(
+        await make_document_search_service(
             embeddings=FakeEmbeddingProvider(),
             documents=document_port,
             graph=FakeGraphStore(
                 [DocumentRetrievalResult(document=make_document("doc-c"), score=0.6)]
             ),
             config=DocumentRetrievalConfig(top_k=1),
-        ).execute(
+        ).search(
             RetrievalQuery(
                 text="창업 관련 문서",
-                request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"),
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
                 scope=SearchScope(document_id="doc-a"),
             )
         )
@@ -479,7 +669,7 @@ class DocumentRetrievalTests(unittest.TestCase):
         self.assertEqual(chunks.scopes[0].document_ids, ())
         self.assertIsNone(chunks.scopes[0].document_type)
 
-    def test_mixed_document_type_candidates_do_not_force_first_type(self) -> None:
+    async def test_mixed_document_type_candidates_do_not_force_first_type(self) -> None:
         chunks = CapturingChunkVectorStore(
             [
                 make_result("doc-a", "doc-a:chunk:0", 0.9),
@@ -498,7 +688,7 @@ class DocumentRetrievalTests(unittest.TestCase):
             ),
         )
 
-        make_find_documents_use_case(
+        await make_document_search_service(
             embeddings=FakeEmbeddingProvider(),
             documents=document_port,
             graph=FakeGraphStore(
@@ -510,35 +700,40 @@ class DocumentRetrievalTests(unittest.TestCase):
                 ]
             ),
             config=DocumentRetrievalConfig(top_k=2),
-        ).execute(
-            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
+        ).search(
+            RetrievalQuery(
+                text="창업 관련 문서",
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
+            )
         )
 
         self.assertIsNone(chunks.scopes[0].document_type)
         self.assertEqual(chunks.scopes[0].document_ids, ("doc-a", "note-b"))
 
-    def test_relationship_scope_uses_resolved_document_set_without_readding_anchor(
+    async def test_relationship_scope_uses_resolved_document_set_without_readding_anchor(
         self,
     ) -> None:
-        chunks = CapturingChunkVectorStore(
-            [make_result("doc-b", "doc-b:chunk:0", 0.9)]
-        )
+        chunks = CapturingChunkVectorStore([make_result("doc-b", "doc-b:chunk:0", 0.9)])
         document_port = FakeDocumentVectorStores(chunks=chunks)
 
-        make_find_documents_use_case(
+        await make_document_search_service(
             embeddings=FakeEmbeddingProvider(),
             documents=document_port,
             graph=FakeGraphStore([], scoped_document_ids=("doc-b",)),
             config=DocumentRetrievalConfig(top_k=1),
-        ).execute(
+        ).search(
             RetrievalQuery(
                 text="창업 관련 문서",
-                request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"),
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
                 scope=SearchScope(
                     document_id="doc-a",
                     document_ids=("doc-b",),
                     folder_ids=("folder-1",),
-                    created_at=TimestampRange(gte="2026-05-01T00:00:00+09:00"),
+                    created_at=datetime.fromisoformat("2026-05-01T00:00:00+09:00"),
                     sort=SearchSort(field="created_at", direction="desc"),
                 ),
             )
@@ -547,61 +742,78 @@ class DocumentRetrievalTests(unittest.TestCase):
         self.assertIsNone(chunks.scopes[0].document_id)
         self.assertEqual(chunks.scopes[0].document_ids, ("doc-b",))
         self.assertEqual(chunks.scopes[0].folder_ids, ())
-        self.assertEqual(chunks.scopes[0].created_at.gte, "2026-05-01T00:00:00+09:00")
+        self.assertEqual(
+            chunks.scopes[0].created_at,
+            datetime.fromisoformat("2026-05-01T00:00:00+09:00"),
+        )
         self.assertEqual(chunks.scopes[0].sort.field, "created_at")
         self.assertEqual(chunks.scopes[0].sort.direction, "desc")
 
-    def test_relevance_filter_removes_unrelated_chunks_before_summary(self) -> None:
+    async def test_keyword_results_are_merged_with_dense_chunk_results(self) -> None:
         document_port = FakeDocumentVectorStores(
-            chunks=CapturingChunkVectorStore(
-                [
-                    make_result("doc-a", "doc-a:chunk:0", 0.9),
-                    make_result("doc-b", "doc-b:chunk:0", 0.8),
-                ]
-            ),
+            chunks=CapturingChunkVectorStore([make_result("doc-a", "doc-a:chunk:0", 0.9)]),
         )
-        results = make_find_documents_use_case(
+        document_projections = FakeDocumentProjectionRepository(
+            chunk_results=[make_result("doc-b", "doc-b:chunk:0", 0.8)]
+        )
+
+        results = await make_document_search_service(
             embeddings=FakeEmbeddingProvider(),
             documents=document_port,
             graph=FakeGraphStore([]),
-            result_filter=FakeRelevanceValidator({"doc-b:chunk:0"}),
-            config=DocumentRetrievalConfig(top_k=2),
-        ).execute(
-            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
-        ).results
-
-        self.assertEqual([result.chunk_id for result in results], ["doc-b:chunk:0"])
-
-    def test_keyword_results_are_merged_with_dense_chunk_results(self) -> None:
-        document_port = FakeDocumentVectorStores(
-            chunks=CapturingChunkVectorStore(
-                [make_result("doc-a", "doc-a:chunk:0", 0.9)]
-            ),
-        )
-        keyword_chunks = FakeKeywordSearchStore(
-            [make_result("doc-b", "doc-b:chunk:0", 0.8)]
-        )
-
-        results = make_find_documents_use_case(
-            embeddings=FakeEmbeddingProvider(),
-            documents=document_port,
-            graph=FakeGraphStore([]),
-            keyword_chunks=keyword_chunks,
+            document_projections=document_projections,
             config=DocumentRetrievalConfig(top_k=2, keyword_top_k=1),
-        ).execute(
-            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
-        ).results
+        ).search(
+            RetrievalQuery(
+                text="창업 관련 문서",
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
+            )
+        )
 
         self.assertEqual(
-            {result.document_id for result in results},
+            {result.chunk.document_id for result in results},
             {"doc-a", "doc-b"},
         )
 
-    def test_keyword_search_uses_resolved_candidate_scope(self) -> None:
-        chunks = CapturingChunkVectorStore(
-            [make_result("doc-a", "doc-a:chunk:0", 0.9)]
+    async def test_title_keyword_score_is_combined_with_chunk_keyword_score(self) -> None:
+        keyword_result = make_result("doc-a", "doc-a:chunk:0", 0.5)
+
+        results = await make_document_search_service(
+            embeddings=FakeEmbeddingProvider(),
+            documents=FakeDocumentVectorStores(
+                chunks=CapturingChunkVectorStore([]),
+            ),
+            graph=FakeGraphStore([]),
+            document_sources=FakeDocumentSourceRepository(
+                title_matches=(
+                    DocumentTitleKeywordMatch(
+                        source=make_source_record("doc-a"),
+                        score=0.25,
+                    ),
+                ),
+            ),
+            document_projections=FakeDocumentProjectionRepository(
+                title_chunks=(keyword_result.chunk,),
+                chunk_results=[keyword_result],
+            ),
+            config=DocumentRetrievalConfig(top_k=1, keyword_top_k=5),
+        ).search(
+            RetrievalQuery(
+                text="창업 관련 문서",
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
+            )
         )
-        keyword_chunks = FakeKeywordSearchStore([])
+
+        self.assertEqual(results[0].chunk.document_id, "doc-a")
+        self.assertEqual(results[0].score, 0.75)
+
+    async def test_keyword_search_uses_resolved_candidate_scope(self) -> None:
+        chunks = CapturingChunkVectorStore([make_result("doc-a", "doc-a:chunk:0", 0.9)])
+        document_projections = FakeDocumentProjectionRepository()
         document_port = FakeDocumentVectorStores(
             chunks=chunks,
             documents=FakeDocumentVectorStore(
@@ -609,21 +821,26 @@ class DocumentRetrievalTests(unittest.TestCase):
             ),
         )
 
-        make_find_documents_use_case(
+        await make_document_search_service(
             embeddings=FakeEmbeddingProvider(),
             documents=document_port,
             graph=FakeGraphStore(
                 [DocumentRetrievalResult(document=make_document("doc-b"), score=0.6)]
             ),
-            keyword_chunks=keyword_chunks,
+            document_projections=document_projections,
             config=DocumentRetrievalConfig(top_k=1),
-        ).execute(
-            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
+        ).search(
+            RetrievalQuery(
+                text="창업 관련 문서",
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
+            )
         )
 
-        self.assertEqual(keyword_chunks.scopes[0].document_ids, ("doc-a", "doc-b"))
+        self.assertEqual(document_projections.scopes[0].document_ids, ("doc-a", "doc-b"))
 
-    def test_document_and_chunk_dense_search_reuse_query_embedding(self) -> None:
+    async def test_document_and_chunk_dense_search_reuse_query_embedding(self) -> None:
         embeddings = FakeEmbeddingProvider()
         chunks = CapturingChunkVectorStore([make_result("doc-a", "doc-a:chunk:0", 0.9)])
 
@@ -633,31 +850,38 @@ class DocumentRetrievalTests(unittest.TestCase):
                 [DocumentRetrievalResult(document=make_document("doc-a"), score=0.7)]
             ),
         )
-        make_find_documents_use_case(
+        await make_document_search_service(
             embeddings=embeddings,
             documents=document_port,
             graph=FakeGraphStore([]),
             config=DocumentRetrievalConfig(top_k=1),
-        ).execute(
-            RetrievalQuery(text="창업 관련 문서", request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"))
+        ).search(
+            RetrievalQuery(
+                text="창업 관련 문서",
+                request_context=RequestContext(
+                    tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                ),
+            )
         )
 
         self.assertEqual(embeddings.calls, 1)
 
-    def test_document_retrieval_rejects_embedding_count_mismatch(self) -> None:
+    async def test_document_retrieval_rejects_embedding_count_mismatch(self) -> None:
         chunks = CapturingChunkVectorStore([])
         document_port = FakeDocumentVectorStores(chunks=chunks)
 
         with self.assertRaises(ProviderContractError):
-            make_find_documents_use_case(
+            await make_document_search_service(
                 embeddings=ShortEmbeddingProvider(),
                 documents=document_port,
                 graph=FakeGraphStore([]),
                 config=DocumentRetrievalConfig(top_k=1),
-            ).execute(
+            ).search(
                 RetrievalQuery(
                     text="창업 관련 문서",
-                    request_context=RequestContext(tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"),
+                    request_context=RequestContext(
+                        tenant="tenant-1", requested_at="2026-05-17T09:30:00+09:00"
+                    ),
                 )
             )
 
